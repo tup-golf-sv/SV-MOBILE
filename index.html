@@ -505,9 +505,9 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important}
 <option value="">기본 카메라 (전면)</option>
 </select>
 <button id="connect" class="white">카메라 연결</button>
-  <button id="arm" class="green" disabled>관절감지 시작</button>
+  <button id="arm" class="green" disabled>자동촬영 시작</button>
   <button id="disconnect" class="dark" disabled>카메라 해제</button>
-<button id="liveViewBtn" class="white">시작</button>
+<button id="liveViewBtn" class="white">LIVE 보기</button>
 <button id="exitBtn" class="dark" type="button">종료</button>
 </div>
 
@@ -1029,7 +1029,7 @@ $('connect').onclick=async()=>{
 
 $('arm').onclick=()=>{
   armed=!armed;ready=false;addressLocked=false;stableSince=0;swingStarted=false;lastPose=null;lastPoseTime=0;
-  $('arm').textContent=armed?'관절감지 정지':'관절감지 시작';
+  $('arm').textContent=armed?'자동촬영 정지':'자동촬영 시작';
   $('state').className='state wait';
   $('addressState').textContent='OFF';$('state').textContent=armed?'사람/어드레스 대기':'대기';
   $('status').textContent=armed?'타석에 서서 어드레스를 잡으세요.':'관절감지 OFF';
