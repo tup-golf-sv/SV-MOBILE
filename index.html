@@ -2304,10 +2304,10 @@ const init=()=>{
   const t=track(),c=caps(t),st=settings(t);
   const active=st.focusMode||'미노출';
   info.textContent='초점 제어 '+supported+' · 선택 '+mode+' · 실제설정 '+active+
-   '\\n지원 모드 '+(Array.isArray(c.focusMode)?c.focusMode.join(', '):'정보 없음')+
-   '\\n초점거리 '+(Number.isFinite(st.focusDistance)?st.focusDistance:'미노출')+
-   '\\n'+message+'\\n'+row('auto','AUTO')+'\\n'+row('manual','LOCK')+
-   '\\n※ 평균은 기록 프레임 기준, 동일 자세·거리로 비교';
+   '\n지원 모드 '+(Array.isArray(c.focusMode)?c.focusMode.join(', '):'정보 없음')+
+   '\n초점거리 '+(Number.isFinite(st.focusDistance)?st.focusDistance:'미노출')+
+   '\n'+message+'\n'+row('auto','AUTO')+'\n'+row('manual','LOCK')+
+   '\n※ 평균은 기록 프레임 기준, 동일 자세·거리로 비교';
  };
  get('svFocusToggle').onclick=()=>{panel.classList.toggle('svFocusCollapsed');get('svFocusToggle').textContent=panel.classList.contains('svFocusCollapsed')?'AF 진단 ▸':'AF 진단 ▾';render()};
  get('svFocusProbe').onclick=()=>{
@@ -2336,7 +2336,7 @@ const init=()=>{
  get('svFocusLock').onclick=()=>setMode('manual');
  get('svFocusClear').onclick=()=>{for(const x of Object.values(sessions)){x.n=0;x.eligible=0;x.stable=0;x.pelvis=0;x.ankle=0}lastSamples=window.svAddressHistory?.samples||0;message='비교 기록 초기화';render()};
  get('svFocusCopy').onclick=()=>{
-  const t=track();const report='SV MOBILE 초점 A/B 진단\\n'+info.textContent+'\\n'+row('auto','AUTO')+'\\n'+row('manual','LOCK');
+  const t=track();const report='SV MOBILE 초점 A/B 진단\n'+info.textContent+'\n'+row('auto','AUTO')+'\n'+row('manual','LOCK');
   if(navigator.clipboard?.writeText)navigator.clipboard.writeText(report).then(()=>{message='복사 완료';render()}).catch(()=>{message='복사 실패';render()});
  };
  // Observe read-only diagnostic samples; never affect READY thresholds.
