@@ -582,10 +582,10 @@ const SWING_CAPTURE_MS=3200;
  // Auto-adaptive ADDRESS confirmation: tolerate short landmark dropouts,
  // but require repeated real frames and recent low-motion evidence.
  let svAddressCandidateSince=0,svAddressLastGood=0,svAddressGoodFrames=0,svAddressTotalFrames=0;
- let svAddressMotionEMA=null,svAddressLastFrame=0;
+ let svAddressMotionEMA=null,svAddressLastFrame=0,svAddressAnchorHip=null,svAddressAnchorAnkle=null;
  const SV_ADDRESS_GAP_MS=180,SV_ADDRESS_MIN_GOOD_FRAMES=6;
  function svResetAddressCandidate(){
-   svAddressCandidateSince=0;svAddressLastGood=0;svAddressGoodFrames=0;svAddressTotalFrames=0;svAddressMotionEMA=null;
+   svAddressCandidateSince=0;svAddressLastGood=0;svAddressGoodFrames=0;svAddressTotalFrames=0;svAddressMotionEMA=null;svAddressAnchorHip=null;svAddressAnchorAnkle=null;
  }
 
 
@@ -963,18 +963,30 @@ async function onResults(results){
     const elapsed=svAddressLastFrame?now-svAddressLastFrame:0;
     svAddressLastFrame=now;
     if(elapsed>450)svResetAddressCandidate();
-    const frameMotion=Math.max(m.stability/0.020,m.pelvisSpeed/MAX_PELVIS_SPEED,m.ankleSpeed/MAX_ANKLE_SPEED);
-    if(Number.isFinite(frameMotion)){
-      svAddressMotionEMA=svAddressMotionEMA===null?frameMotion:
-        (0.22*frameMotion+0.78*svAddressMotionEMA);
-    }
-    const stableAddress=isAddress && Number.isFinite(frameMotion) &&
-      (frameMotion<1 || (svAddressMotionEMA!==null && svAddressMotionEMA<1));
-    if(stableAddress){
-      if(!svAddressCandidateSince)svAddressCandidateSince=now;
-      svAddressLastGood=now;svAddressGoodFrames++;svAddressTotalFrames++;
+    // Confirm address from repeated pose geometry, not frame-to-frame pixel jitter.
+    // Require a mostly stationary hip/ankle anchor over the whole 850ms window.
+    const hip=rotated[23]&&rotated[24]
+      ? {x:(rotated[23].x+rotated[24].x)/2,y:(rotated[23].y+rotated[24].y)/2}:null;
+    const ankle=rotated[27]&&rotated[28]
+      ? {x:(rotated[27].x+rotated[28].x)/2,y:(rotated[27].y+rotated[28].y)/2}:null;
+    const validGeometry=isAddress && hip && ankle &&
+      [hip.x,hip.y,ankle.x,ankle.y].every(Number.isFinite) &&
+      hip.x>=0 && hip.x<=1 && hip.y>=0 && hip.y<=1 &&
+      ankle.x>=0 && ankle.x<=1 && ankle.y>=0 && ankle.y<=1;
+    if(validGeometry){
+      if(!svAddressCandidateSince){
+        svAddressCandidateSince=now;
+        svAddressAnchorHip={...hip};svAddressAnchorAnkle={...ankle};
+        svAddressGoodFrames=0;svAddressTotalFrames=0;
+      }
+      const anchorMotion=dist(hip,svAddressAnchorHip)+dist(ankle,svAddressAnchorAnkle);
+      if(anchorMotion>0.18){
+        svResetAddressCandidate(); // Walking or significant repositioning
+      }else{
+        svAddressLastGood=now;svAddressGoodFrames++;svAddressTotalFrames++;
+      }
     }else if(svAddressCandidateSince && now-svAddressLastGood<=SV_ADDRESS_GAP_MS){
-      svAddressTotalFrames++; // brief dropout: retain candidate, not good-frame count
+      svAddressTotalFrames++;
     }else{
       svResetAddressCandidate();
     }
