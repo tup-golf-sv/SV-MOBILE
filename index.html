@@ -1792,7 +1792,7 @@ $('disconnect').onclick=()=>{
  const overlay=document.createElement('canvas');overlay.id='svDrawOverlay';stage.appendChild(overlay);
  const bar=document.createElement('div');bar.id='svDrawBar';
  bar.innerHTML='<button type="button" data-mode="line">직선</button><button type="button" data-mode="circle">원</button><button type="button" data-mode="angle">각도 3점</button><button type="button" data-mode="off" class="active">그리기 OFF</button><input type="color" id="svDrawColor" value="#f5d86a" aria-label="선 색상"><button type="button" id="svDrawUndo">되돌리기</button><button type="button" id="svDrawClear">전체 삭제</button><span id="svDrawInfo">영상을 정지한 뒤 직선·원·각도를 선택하세요.</span>';
- stage.insertAdjacentElement('afterend',bar);
+ document.body.appendChild(bar); // toolbar must remain visible when replay panel is hidden in LIVE mode
  const info=document.getElementById('svDrawInfo'),ctx=overlay.getContext('2d');
  let mode='off',shapes=[],anglePoints=[],dragStart=null,dragEnd=null,ink='#f5d86a';
  const norm=(e)=>{const r=overlay.getBoundingClientRect();return {x:Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),y:Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))}};
@@ -1893,6 +1893,7 @@ $('disconnect').onclick=()=>{
 #svDrawBar{position:fixed!important;left:50%!important;transform:translateX(-50%)!important;bottom:72px!important;z-index:1000!important;width:min(calc(100vw - 12px),950px)!important;display:flex!important;flex-wrap:nowrap!important;align-items:center!important;overflow-x:auto!important;gap:5px!important;min-height:42px!important;padding:5px!important;margin:0!important;background:rgba(8,31,22,.88)!important;backdrop-filter:blur(8px);box-shadow:0 3px 16px #0008}
 #svDrawBar button{flex:0 0 auto!important;min-height:32px!important;white-space:nowrap!important}
 #svDrawInfo{display:none!important}
+body #svDrawBar{visibility:visible!important;opacity:1!important}
 #svDrawBar input[type=color]{flex:0 0 34px!important}
 .svAcademyBrand{position:absolute;left:0;right:0;z-index:14;pointer-events:none;display:flex;justify-content:space-between;align-items:center;gap:6px;padding:5px 10px;color:#fff;font-family:Arial,sans-serif;background:linear-gradient(90deg,rgba(3,24,13,.66),rgba(3,24,13,.35));font-size:clamp(9px,1.6vw,13px);line-height:1.25}
 .svAcademyBrand.top{top:0}.svAcademyBrand.bottom{bottom:0}
