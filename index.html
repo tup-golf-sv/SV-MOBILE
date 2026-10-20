@@ -821,11 +821,11 @@ function svAddressDiagnostic(lm,check,m){
   const fmt=v=>Number.isFinite(v)?v.toFixed(3):'UNKNOWN';
   dock.querySelector('#svAddressDiagDetail').textContent=
     '점수 '+check.score+'/7 · 하체 '+(missing.some(i=>i>=25)?'인식 부족':'인식 확인')+
-    '\\n안정도 '+fmt(m.stability)+' / 0.020'+
-    '\\n골반속도 '+fmt(m.pelvisSpeed)+' / '+MAX_PELVIS_SPEED+
-    '\\n발목속도 '+fmt(m.ankleSpeed)+' / '+MAX_ANKLE_SPEED+
-    '\\nLOCK '+(addressLocked?'ON':'OFF')+
-    '\\n차단: '+(addressLocked?'없음':fail.join(' · '));
+    '\n안정도 '+fmt(m.stability)+' / 0.020'+
+    '\n골반속도 '+fmt(m.pelvisSpeed)+' / '+MAX_PELVIS_SPEED+
+    '\n발목속도 '+fmt(m.ankleSpeed)+' / '+MAX_ANKLE_SPEED+
+    '\nLOCK '+(addressLocked?'ON':'OFF')+
+    '\n차단: '+(addressLocked?'없음':fail.join(' · '));
 }
 
 async function onResults(results){
