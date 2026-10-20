@@ -1887,5 +1887,41 @@ $('disconnect').onclick=()=>{
   else explainContext();
 })();
 </script>
+
+<!-- SV MOBILE V5: visible drawing tools and transparent academy branding; no changes to camera, replay or saving algorithms -->
+<style id="svMobileV5BrandDrawFix">
+#svDrawBar{position:fixed!important;left:50%!important;transform:translateX(-50%)!important;bottom:72px!important;z-index:1000!important;width:min(calc(100vw - 12px),950px)!important;display:flex!important;flex-wrap:nowrap!important;align-items:center!important;overflow-x:auto!important;gap:5px!important;min-height:42px!important;padding:5px!important;margin:0!important;background:rgba(8,31,22,.88)!important;backdrop-filter:blur(8px);box-shadow:0 3px 16px #0008}
+#svDrawBar button{flex:0 0 auto!important;min-height:32px!important;white-space:nowrap!important}
+#svDrawInfo{display:none!important}
+#svDrawBar input[type=color]{flex:0 0 34px!important}
+.svAcademyBrand{position:absolute;left:0;right:0;z-index:14;pointer-events:none;display:flex;justify-content:space-between;align-items:center;gap:6px;padding:5px 10px;color:#fff;font-family:Arial,sans-serif;background:linear-gradient(90deg,rgba(3,24,13,.66),rgba(3,24,13,.35));font-size:clamp(9px,1.6vw,13px);line-height:1.25}
+.svAcademyBrand.top{top:0}.svAcademyBrand.bottom{bottom:0}
+.svAcademyBrand strong{color:#b8ed52;font-size:clamp(13px,2.5vw,21px);letter-spacing:.03em;white-space:nowrap}
+.svAcademyBrand span{text-align:right}
+#svBrandToggle{position:fixed;right:8px;bottom:120px;z-index:1001;border:1px solid #52765c;border-radius:7px;background:rgba(8,31,22,.8);color:#e9f3e9;padding:5px 8px;font:600 11px Arial,sans-serif}
+body.svBrandHidden .svAcademyBrand{display:none!important}
+@media(max-width:700px){#svDrawBar{bottom:82px!important;width:calc(100vw - 8px)!important;min-height:40px!important}#svDrawBar button{min-height:30px!important;font-size:11px!important;padding:3px 8px!important}#svBrandToggle{bottom:128px}}
+</style>
+<script id="svMobileV5BrandDrawScript">
+(()=>{
+ const init=()=>{
+  for(const id of ['mainVideoStage','liveStage']){
+   const stage=document.getElementById(id);if(!stage||stage.querySelector('.svAcademyBrand'))continue;
+   if(getComputedStyle(stage).position==='static')stage.style.position='relative';
+   const top=document.createElement('div');top.className='svAcademyBrand top';
+   top.innerHTML='<strong>T.UP <small style="font-size:9px;color:white">GOLF ACADEMY</small></strong><span>스윙의 원리를 이해하면, 골프가 달라집니다.</span>';
+   const bottom=document.createElement('div');bottom.className='svAcademyBrand bottom';
+   bottom.innerHTML='<span>T.UP BRAIN GOLF</span><span>레슨 상담 0507-1487-8905</span>';
+   stage.append(top,bottom);
+  }
+  if(!document.getElementById('svBrandToggle')){
+   const b=document.createElement('button');b.id='svBrandToggle';b.type='button';b.textContent='광고 숨김';
+   b.onclick=()=>{const hidden=document.body.classList.toggle('svBrandHidden');b.textContent=hidden?'광고 표시':'광고 숨김'};
+   document.body.appendChild(b);
+  }
+ };
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
+})();
+</script>
 </body>
 </html>
