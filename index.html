@@ -502,7 +502,7 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important}
 
 <div class="controls">
   <select id="cameraSelect" class="white" title="카메라 선택" style="max-width:180px">
-<option value="">기본 카메라</option>
+<option value="">기본 카메라 (전면)</option>
 </select>
 <button id="connect" class="white">카메라 연결</button>
   <button id="arm" class="green" disabled>관절감지 시작</button>
@@ -968,7 +968,7 @@ async function refreshCameraList(){
     const prev=sel.value;
     const devices=await navigator.mediaDevices.enumerateDevices();
     const cams=devices.filter(d=>d.kind==='videoinput');
-    sel.innerHTML='<option value="">기본 카메라</option>';
+    sel.innerHTML='<option value="">기본 카메라 (전면)</option>';
     cams.forEach((d,i)=>{
       const o=document.createElement('option');
       o.value=d.deviceId; o.textContent=d.label||('카메라 '+(i+1)); sel.appendChild(o);
@@ -988,16 +988,10 @@ $('connect').onclick=async()=>{
     }
     const videoConstraints=selectedCamera
       ? {deviceId:{exact:selectedCamera},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}}
-      : {facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}};
+      : {facingMode:{exact:'user'},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}};
     $('status').textContent='카메라 권한을 요청하는 중입니다. 브라우저 권한 창에서 허용을 눌러주세요.';
-    try{
-      stream=await navigator.mediaDevices.getUserMedia({video:videoConstraints,audio:false});
-    }catch(firstError){
-      // Retry only if device constraints are unsupported; never bypass permission denial.
-      if(['OverconstrainedError','NotFoundError'].includes(firstError.name)){
-        stream=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
-      }else{throw firstError;}
-    }
+    // Never silently switch a requested front camera to the rear camera.
+    stream=await navigator.mediaDevices.getUserMedia({video:videoConstraints,audio:false});
     raw.srcObject=stream;
     raw.style.display='block';
     await raw.play();
