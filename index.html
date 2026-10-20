@@ -797,6 +797,14 @@ function startRecording(){
     replay.src=URL.createObjectURL(blob);
     replay.loop=true; replay.muted=true; replay.load();
     replay.onloadedmetadata=()=>{
+      // Recorded portrait-phone camera stream: apply the field-tested 270° replay view.
+      // Keep desktop's existing rotation and imported-video orientation unchanged.
+      const portraitPhone=window.matchMedia('(orientation: portrait) and (pointer: coarse)').matches;
+      if(portraitPhone && raw.videoHeight>raw.videoWidth){
+        window.svFrontRotation=270;
+        const rotateBtn=document.getElementById('frontRotateBtn');
+        if(rotateBtn)rotateBtn.textContent='영상회전 270°';
+      }
       $('replayPlay').disabled=false;$('replayPause').disabled=false;
       $('sendA').disabled=false;$('sendB').disabled=false;$('frontJointBtn').disabled=false;
       $('frameBack').disabled=false;$('frameNext').disabled=false;
