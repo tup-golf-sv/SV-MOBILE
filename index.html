@@ -1996,5 +1996,61 @@ body #svDrawDock #svDrawBar input[type=color]{width:100%!important;min-height:va
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 })();
 </script>
+
+<!-- UI repair R1: float controls outside mode-hidden panels; preserve event handlers -->
+<style id="svMeasuredFloatingRepair">
+html,body{height:100%!important;overflow:hidden!important}
+.wrap{height:100dvh!important;max-height:100dvh!important;min-height:0!important;padding:3px!important;overflow:hidden!important}
+.wrap.live-first-mode #svLivePanel{height:100%!important;max-height:100%!important;padding:2px!important;overflow:hidden!important}
+.wrap.live-first-mode #svLivePanel #liveStage{height:calc(100dvh - 10px)!important;min-height:0!important;max-height:none!important}
+.wrap.replay-mode #svReplayPanel{height:calc(100dvh - 10px)!important;max-height:none!important;min-height:0!important;grid-template-rows:minmax(0,1fr)!important;display:grid!important;padding:2px!important}
+.wrap.replay-mode #svReplayPanel #mainVideoStage{height:100%!important;min-height:0!important;max-height:none!important;grid-row:1!important}
+.wrap.replay-mode #svReplayPanel>.sub,.wrap.replay-mode #svReplayPanel>#result{display:none!important}
+/* These groups are moved to BODY, never descendants of hidden LIVE/REPLAY panels. */
+body>#svFloatingCamera{position:fixed!important;z-index:3500!important;top:calc(env(safe-area-inset-top,0px) + 7px)!important;left:50%!important;transform:translateX(-50%)!important;display:flex!important;align-items:center!important;gap:4px!important;flex-wrap:nowrap!important;width:max-content!important;max-width:calc(100vw - 12px)!important;overflow-x:auto!important;scrollbar-width:none!important;padding:4px!important;margin:0!important;background:rgba(9,40,27,.82)!important;border-radius:12px!important;box-shadow:0 2px 10px #0008!important}
+body>#svFloatingCamera>*{flex-shrink:0!important}
+body>#svFloatingCamera button,body>#svFloatingCamera select{height:clamp(29px,3.8vw,36px)!important;min-height:0!important;font-size:clamp(10px,1.15vw,13px)!important;padding:3px clamp(5px,.8vw,10px)!important;white-space:nowrap!important}
+body>#svVideoFileDock{position:fixed!important;z-index:3450!important;left:clamp(6px,.7vw,12px)!important;top:calc(env(safe-area-inset-top,0px) + 49px)!important;display:inline-flex!important;width:max-content!important;max-width:calc(100vw - 14px)!important;gap:5px!important;padding:4px!important;background:rgba(8,33,23,.72)!important;border-radius:10px!important}
+body>#svVideoFileDock #svMobileLibraryBar,body>#svVideoFileDock #svMobileSaveBar{display:contents!important;position:static!important}
+body>#svVideoFileDock button{height:clamp(30px,3.5vw,37px)!important;min-height:0!important;font-size:clamp(10px,1.1vw,13px)!important;padding:4px clamp(6px,.7vw,11px)!important;white-space:nowrap!important}
+body>#svFloatingReplay{position:fixed!important;z-index:3500!important;bottom:calc(env(safe-area-inset-bottom,0px) + 29px)!important;left:50%!important;transform:translateX(-50%)!important;display:none!important;align-items:center!important;justify-content:center!important;flex-wrap:nowrap!important;gap:4px!important;width:max-content!important;max-width:calc(100vw - 10px)!important;overflow-x:auto!important;scrollbar-width:none!important;padding:4px!important;margin:0!important;background:rgba(8,38,26,.80)!important;border-radius:12px!important}
+body>#svFloatingReplay>*{flex-shrink:0!important}
+body>#svFloatingReplay button{height:clamp(29px,3.5vw,36px)!important;min-height:0!important;padding:3px clamp(5px,.6vw,10px)!important;font-size:clamp(10px,1vw,13px)!important;white-space:nowrap!important}
+body>#svFloatingSeek{position:fixed!important;z-index:3400!important;left:8px!important;right:8px!important;bottom:calc(env(safe-area-inset-bottom,0px) + 3px)!important;display:none!important;align-items:center!important;gap:6px!important;height:20px!important;margin:0!important;padding:0!important;background:rgba(5,23,16,.55)!important}
+body>#svFloatingSeek input{flex:1!important;min-width:0!important}
+body:has(.wrap.replay-mode)>#svFloatingReplay{display:flex!important}
+body:has(.wrap.replay-mode)>#svFloatingSeek{display:flex!important}
+body>#svDrawDock{z-index:3300!important}
+#svBrandToggle{display:none!important}
+@media(max-width:700px){
+ body>#svFloatingCamera{top:calc(env(safe-area-inset-top,0px) + 5px)!important;max-width:calc(100vw - 8px)!important}
+ body>#svFloatingCamera button,body>#svFloatingCamera select{font-size:10px!important;padding:3px 5px!important}
+ body>#svVideoFileDock{top:calc(env(safe-area-inset-top,0px) + 48px)!important}
+ body>#svFloatingReplay{bottom:calc(env(safe-area-inset-bottom,0px) + 27px)!important;justify-content:flex-start!important}
+ body>#svFloatingReplay button{font-size:10px!important;padding:3px 5px!important}
+}
+</style>
+<script id="svMeasuredFloatingRepairScript">
+(()=>{
+ const init=()=>{
+  const live=document.querySelector('#svLivePanel > .controls');
+  const replay=document.querySelector('#svReplayPanel > .controls');
+  const seek=document.getElementById('replaySeek')?.parentElement;
+  const dock=document.getElementById('svVideoFileDock');
+  if(live){live.id='svFloatingCamera';document.body.append(live)}
+  if(replay){replay.id='svFloatingReplay';document.body.append(replay)}
+  if(seek){seek.id='svFloatingSeek';document.body.append(seek)}
+  if(dock)document.body.append(dock);
+  // Existing listeners and file input nodes are preserved, not reconstructed.
+  // Explicit mode sync for browsers without :has support.
+  const sync=()=>{const isReplay=document.querySelector('.wrap')?.classList.contains('replay-mode');
+   if(replay)replay.style.setProperty('display',isReplay?'flex':'none','important');
+   if(seek)seek.style.setProperty('display',isReplay?'flex':'none','important');
+  };
+  const wrap=document.querySelector('.wrap');if(wrap){new MutationObserver(sync).observe(wrap,{attributes:true,attributeFilter:['class']});sync()}
+ };
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
+})();
+</script>
 </body>
 </html>
