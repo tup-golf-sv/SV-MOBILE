@@ -2046,5 +2046,38 @@ body>#svDrawDock{z-index:3300!important}
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 })();
 </script>
+<!-- SV MOBILE camera preview rotation control: display only; capture/pose processing untouched. -->
+<style id="svCameraRotateControlStyle">
+body>#svFloatingCamera #svCameraRotateBtn{flex:0 0 auto!important;min-width:34px!important;background:rgba(22,82,58,.94)!important;color:#fff!important;border:1px solid rgba(163,205,176,.45)!important;border-radius:8px!important}
+</style>
+<script id="svCameraRotateControlScript">
+(()=>{
+ const init=()=>{
+  const bar=document.getElementById('svFloatingCamera');
+  const raw=document.getElementById('raw');
+  const stage=document.getElementById('liveStage');
+  if(!bar||!raw||!stage||document.getElementById('svCameraRotateBtn'))return;
+  const btn=document.createElement('button');
+  btn.type='button';btn.id='svCameraRotateBtn';btn.textContent='↻ 90°';btn.title='카메라 화면을 90도씩 회전 (관절 분석 방향은 변경하지 않음)';
+  const select=document.getElementById('cameraSelect');
+  if(select)select.insertAdjacentElement('afterend',btn);else bar.appendChild(btn);
+  let angle=90;
+  function apply(){
+   const w=Math.max(1,stage.clientWidth),h=Math.max(1,stage.clientHeight);
+   const quarter=angle%180!==0;
+   raw.style.setProperty('width',(quarter?h:w)+'px','important');
+   raw.style.setProperty('height',(quarter?w:h)+'px','important');
+   raw.style.setProperty('transform','translate(-50%,-50%) rotate('+angle+'deg)','important');
+   btn.textContent='↻ '+angle+'°';
+  }
+  btn.addEventListener('click',()=>{angle=(angle+90)%360;apply()});
+  window.addEventListener('resize',apply);
+  raw.addEventListener('loadedmetadata',apply);
+  new ResizeObserver(apply).observe(stage);
+  apply();
+ };
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
+})();
+</script>
 </body>
 </html>
