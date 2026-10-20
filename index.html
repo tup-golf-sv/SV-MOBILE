@@ -827,6 +827,30 @@ function stopRecordingSoon(){
 // ADDRESS diagnostic display only; scoring and READY thresholds are unchanged.
 const svAddressHistory={samples:0,best:null,last:null,bestStable:null,stableStart:0,longestHold:0,stableFrames:0,stableCount:0};
 window.svAddressHistory=svAddressHistory;
+const svAxisTrace={frames:0,missing:{},failed:[0,0,0,0,0,0,0],best:null,last:null,nearZeroFeet:0,nearZeroKnees:0};
+function svAxisSample(lm,check){
+ if(!lm)return;
+ const t=svAxisTrace;t.frames++;
+ const ids=[11,12,15,16,23,24,25,26,27,28];
+ for(const id of ids){if(!lm[id]||!Number.isFinite(lm[id].x)||!Number.isFinite(lm[id].y)||((lm[id].visibility??1)<.20))t.missing[id]=(t.missing[id]||0)+1;}
+ if(check.checks)check.checks.forEach((c,i)=>{if(!c[1])t.failed[i]++;});
+ const a=lm[27],b=lm[28],k=lm[25],j=lm[26];
+ if(a&&b&&Number.isFinite(a.x)&&Number.isFinite(b.x)&&Math.abs(a.x-b.x)<.02)t.nearZeroFeet++;
+ if(k&&j&&Number.isFinite(k.x)&&Number.isFinite(j.x)&&Math.abs(k.x-j.x)<.02)t.nearZeroKnees++;
+ const snap={score:check.score,oneLeg:!!check.obviousOneLeg,points:ids.map(id=>{const p=lm[id];return id+':'+(p?Number(p.x).toFixed(3)+','+Number(p.y).toFixed(3)+' v'+Number(p.visibility??1).toFixed(2):'없음');}).join(' | ')};
+ t.last=snap;if(!t.best||snap.score>t.best.score)t.best=snap;
+}
+function svAxisReport(){
+ const t=svAxisTrace,labels=['골반 중앙','발 간격','무릎 간격','양손 간격','손 높이','손-골반','다리 길이'];
+ return '\n\n[카메라·관절 좌표 진단]\n원본 영상 '+(raw.videoWidth||0)+'×'+(raw.videoHeight||0)+' / MediaPipe 입력 '+poseInput.width+'×'+poseInput.height+
+ ' / 입력 회전 +90도 / 화면 회전 '+(window.svPreviewRotationDeg??90)+'도'+
+ '\n좌표 샘플 '+t.frames+'프레임 / 양발 X차이 0.02 미만 '+t.nearZeroFeet+'회 / 무릎 X차이 0.02 미만 '+t.nearZeroKnees+'회'+
+ '\n관절 누락·저신뢰(0.20 미만): '+[11,12,15,16,23,24,25,26,27,28].map(i=>i+'='+ (t.missing[i]||0)).join(' ')+
+ '\n조건 실패 횟수: '+labels.map((v,i)=>v+' '+t.failed[i]).join(' / ')+
+ '\n최고 점수 좌표('+ (t.best?.score??'UNKNOWN')+'/7, 비대칭 '+(t.best?.oneLeg?'YES':'NO')+'): '+(t.best?.points??'없음')+
+ '\n마지막 좌표: '+(t.last?.points??'없음');
+}
+function svAxisReset(){Object.assign(svAxisTrace,{frames:0,missing:{},failed:[0,0,0,0,0,0,0],best:null,last:null,nearZeroFeet:0,nearZeroKnees:0});}
 const svReadyTrace={frames:0,firstAt:0,lastAt:0,gapSum:0,gapCount:0,maxGap:0,over450:0,candidates:0,resets:{frameGap:0,anchorMotion:0,invalidGeometry:0},rejected:{score:0,oneLeg:0,coordinates:0},maxCandidateMs:0,readyCount:0,lastReason:'대기',lastScore:0,lastAnchorMotion:null};
 function svReadyTraceReport(){
  const t=svReadyTrace,seconds=(t.lastAt-t.firstAt)/1000;
@@ -875,11 +899,11 @@ function svAddressDiagnostic(lm,check,m){
     controls.innerHTML='<button type="button" id="svAddressClear">기록 초기화</button><button type="button" id="svAddressCopy">결과 복사</button>';
     dock.appendChild(controls);
     controls.querySelector('#svAddressClear').addEventListener('click',()=>{
-      svAddressHistory.samples=0;svAddressHistory.best=null;svAddressHistory.last=null;svAddressHistory.bestStable=null;svAddressHistory.stableStart=0;svAddressHistory.longestHold=0;svAddressHistory.stableFrames=0;svAddressHistory.stableCount=0;svReadyTraceReset();
+      svAddressHistory.samples=0;svAddressHistory.best=null;svAddressHistory.last=null;svAddressHistory.bestStable=null;svAddressHistory.stableStart=0;svAddressHistory.longestHold=0;svAddressHistory.stableFrames=0;svAddressHistory.stableCount=0;svReadyTraceReset();svAxisReset();
       svAddressDiagnostic(null,{score:0,ok:false}, {stability:NaN,pelvisSpeed:NaN,ankleSpeed:NaN},false);
     });
     controls.querySelector('#svAddressCopy').addEventListener('click',()=>{
-      const report='SV MOBILE ADDRESS 진단\n'+(svAddressHistory.best?'최고 점수 '+svAddressHistory.best.score+'/7 · '+svAddressHistory.best.timestamp+'\n'+svAddressHistory.best.lines:'저장된 사람 인식 기록 없음')+'\n\n최장 안정 유지 '+Math.round(svAddressHistory.longestHold)+' / '+STABLE_MS+' ms\n'+(svAddressHistory.bestStable?'최장 안정 구간 '+svAddressHistory.bestStable.timestamp+'\n'+svAddressHistory.bestStable.lines:'안정 조건 동시 충족 기록 없음')+svReadyTraceReport();
+      const report='SV MOBILE ADDRESS 진단\n'+(svAddressHistory.best?'최고 점수 '+svAddressHistory.best.score+'/7 · '+svAddressHistory.best.timestamp+'\n'+svAddressHistory.best.lines:'저장된 사람 인식 기록 없음')+'\n\n최장 안정 유지 '+Math.round(svAddressHistory.longestHold)+' / '+STABLE_MS+' ms\n'+(svAddressHistory.bestStable?'최장 안정 구간 '+svAddressHistory.bestStable.timestamp+'\n'+svAddressHistory.bestStable.lines:'안정 조건 동시 충족 기록 없음')+svReadyTraceReport()+svAxisReport();
       if(navigator.clipboard?.writeText)navigator.clipboard.writeText(report).catch(()=>{});
     });
   }
@@ -963,6 +987,7 @@ async function onResults(results){
   // Always refresh diagnostics while pose frames arrive, even when swing detection is OFF.
   const addressCheck=addressSimilarity(rotated);
   const isAddress=addressCheck.ok;
+  if(armed)svAxisSample(rotated,addressCheck);
   svAddressDiagnostic(rotated,addressCheck,m);
   if(!armed || cooldown) return;
   {const t=svReadyTrace,gap=t.lastAt?now-t.lastAt:0;if(!t.firstAt)t.firstAt=now;t.frames++;if(t.lastAt){t.gapSum+=gap;t.gapCount++;t.maxGap=Math.max(t.maxGap,gap);if(gap>450)t.over450++;}t.lastAt=now;t.lastScore=addressCheck.score;}
