@@ -794,6 +794,40 @@ function stopRecordingSoon(){
   setTimeout(()=>{if(recorder&&recorder.state==='recording') recorder.stop()},SWING_CAPTURE_MS);
 }
 
+// ADDRESS diagnostic display only. No changes to scoring, thresholds or state.
+function svAddressDiagnostic(lm,check,m){
+  let dock=document.getElementById('svAddressDiag');
+  if(!dock){
+    dock=document.createElement('div');dock.id='svAddressDiag';
+    dock.innerHTML='<button id="svAddressDiagToggle" type="button" aria-expanded="false">LOCK 진단 ▸</button><div id="svAddressDiagDetail" hidden></div>';
+    document.body.appendChild(dock);
+    dock.querySelector('button').addEventListener('click',()=>{
+      const detail=dock.querySelector('#svAddressDiagDetail');
+      detail.hidden=!detail.hidden;
+      dock.querySelector('button').textContent=detail.hidden?'LOCK 진단 ▸':'LOCK 진단 ▾';
+      dock.querySelector('button').setAttribute('aria-expanded',String(!detail.hidden));
+    });
+  }
+  const needed=[11,12,15,16,23,24,25,26,27,28];
+  const missing=needed.filter(i=>!lm?.[i]||(lm[i].visibility!=null&&lm[i].visibility<0.20));
+  const names={11:'왼어깨',12:'오른어깨',15:'왼손목',16:'오른손목',23:'왼골반',24:'오른골반',25:'왼무릎',26:'오른무릎',27:'왼발목',28:'오른발목'};
+  const fail=[];
+  if(missing.length)fail.push('관절 부족: '+missing.map(i=>names[i]).join(', '));
+  if(!check.ok)fail.push(check.obviousOneLeg?'하체 비대칭':'어드레스 점수 부족');
+  if(!(m.stability<0.020))fail.push('안정도 초과');
+  if(!(m.pelvisSpeed<MAX_PELVIS_SPEED))fail.push('골반 이동 초과');
+  if(!(m.ankleSpeed<MAX_ANKLE_SPEED))fail.push('발목 이동 초과');
+  if(!fail.length)fail.push('자세 유지시간 확인 중');
+  const fmt=v=>Number.isFinite(v)?v.toFixed(3):'UNKNOWN';
+  dock.querySelector('#svAddressDiagDetail').textContent=
+    '점수 '+check.score+'/7 · 하체 '+(missing.some(i=>i>=25)?'인식 부족':'인식 확인')+
+    '\\n안정도 '+fmt(m.stability)+' / 0.020'+
+    '\\n골반속도 '+fmt(m.pelvisSpeed)+' / '+MAX_PELVIS_SPEED+
+    '\\n발목속도 '+fmt(m.ankleSpeed)+' / '+MAX_ANKLE_SPEED+
+    '\\nLOCK '+(addressLocked?'ON':'OFF')+
+    '\\n차단: '+(addressLocked?'없음':fail.join(' · '));
+}
+
 async function onResults(results){
   processing=false;
   lastPoseRenderAt=performance.now();
@@ -832,6 +866,7 @@ async function onResults(results){
 
   const addressCheck=addressSimilarity(rotated);
   const isAddress=addressCheck.ok;
+  svAddressDiagnostic(rotated,addressCheck,m);
 
   if(!ready && !swingStarted){
     // ADDRESS LOCK is mandatory. Without it, every movement is treated as normal movement.
@@ -2141,5 +2176,12 @@ body #svCameraRotateBtn{top:calc(env(safe-area-inset-top,0px) + 107px)!important
  else {place();requestAnimationFrame(place)}
 })();
 </script>
+<style id="svAddressDiagStyle">
+#svAddressDiag{position:fixed;left:6px;bottom:calc(env(safe-area-inset-bottom,0px) + 66px);z-index:3650;max-width:min(260px,65vw);font:11px/1.45 Arial,sans-serif;color:#f0f8f2;background:rgba(5,28,19,.78);border:1px solid rgba(165,210,178,.35);border-radius:8px;box-shadow:0 2px 8px #0005}
+#svAddressDiagToggle{display:block!important;min-height:27px!important;padding:4px 8px!important;font:700 11px Arial,sans-serif!important;color:#f0f8f2!important;background:transparent!important;border:0!important}
+#svAddressDiagDetail{padding:3px 8px 8px;white-space:pre-line;overflow-wrap:anywhere}
+#svAddressDiagDetail[hidden]{display:none!important}
+@media(max-height:440px){#svAddressDiag{bottom:8px;max-width:220px;font-size:10px}}
+</style>
 </body>
 </html>
