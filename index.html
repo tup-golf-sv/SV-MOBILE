@@ -827,7 +827,7 @@ function svAddressSnapshot(lm,check,m){
     ...(check.checks?check.checks.map(c=>(c[1]?'✓ ':'× ')+c[0]+' '+(Number.isFinite(c[2])?c[2].toFixed(3):'?')+' ('+c[3]+')'):['관절 데이터 부족']),
     '차단: '+fail.join(' · ')
   ];
-  return {score:check.score,valid:!!check.checks,lines:lines.join('\\n'),timestamp:new Date().toLocaleTimeString('ko-KR')};
+  return {score:check.score,valid:!!check.checks,lines:lines.join('\n'),timestamp:new Date().toLocaleTimeString('ko-KR')};
 }
 function svAddressDiagnostic(lm,check,m){
   let dock=document.getElementById('svAddressDiag');
@@ -848,7 +848,7 @@ function svAddressDiagnostic(lm,check,m){
       svAddressDiagnostic(null,{score:0,ok:false}, {stability:NaN,pelvisSpeed:NaN,ankleSpeed:NaN},false);
     });
     controls.querySelector('#svAddressCopy').addEventListener('click',()=>{
-      const report='SV MOBILE ADDRESS 진단\\n'+(svAddressHistory.best?'최고 점수 '+svAddressHistory.best.score+'/7 · '+svAddressHistory.best.timestamp+'\\n'+svAddressHistory.best.lines:'저장된 사람 인식 기록 없음');
+      const report='SV MOBILE ADDRESS 진단\n'+(svAddressHistory.best?'최고 점수 '+svAddressHistory.best.score+'/7 · '+svAddressHistory.best.timestamp+'\n'+svAddressHistory.best.lines:'저장된 사람 인식 기록 없음');
       if(navigator.clipboard?.writeText)navigator.clipboard.writeText(report).catch(()=>{});
     });
   }
@@ -865,10 +865,10 @@ function svAddressDiagnostic(lm,check,m){
   head.textContent='LOCK 진단 '+(armed?'ON':'OFF')+' · 현재 '+check.score+'/7 · 최고 '+(best?best.score+'/7':'없음')+(detail.hidden?' ▸':' ▾');
   detail.textContent=
     '감지 '+(armed?'ON':'OFF')+' · 기록 '+svAddressHistory.samples+'회'+
-    '\\n현재: '+snapshot.lines+
-    '\\n\\n━━ 자동 보존된 최고 점수 ━━\\n'+
-    (best?best.timestamp+'\\n'+best.lines:'아직 저장된 자세 없음')+
-    '\\nLOCK '+(addressLocked?'ON':'OFF');
+    '\n현재: '+snapshot.lines+
+    '\n\n━━ 자동 보존된 최고 점수 ━━\n'+
+    (best?best.timestamp+'\n'+best.lines:'아직 저장된 자세 없음')+
+    '\nLOCK '+(addressLocked?'ON':'OFF');
 }
 
 async function onResults(results){
