@@ -1924,5 +1924,77 @@ body.svBrandHidden .svAcademyBrand{display:none!important}
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 })();
 </script>
+
+<!-- SV MOBILE V7: viewport-measured floating drawing menu. Existing drawing engine unchanged. -->
+<style id="svMobileV7ResponsiveDraw">
+:root{--sv-vw:100vw;--sv-vh:100dvh;--sv-touch:44px;--sv-ui-font:13px;--sv-right:8px;--sv-top:40%}
+#svDrawDock{position:fixed!important;right:var(--sv-right)!important;top:var(--sv-top)!important;bottom:auto!important;left:auto!important;z-index:2100!important;display:flex!important;flex-direction:column!important;align-items:flex-end!important;gap:5px!important;max-height:calc(var(--sv-vh) - 110px)!important;pointer-events:none!important}
+#svDrawDock>*{pointer-events:auto!important}
+#svDrawToggle{display:block!important;min-height:var(--sv-touch)!important;min-width:var(--sv-touch)!important;padding:6px 10px!important;border-radius:11px!important;border:1px solid #91b8a0!important;background:rgba(9,39,26,.82)!important;color:#f1f7f1!important;font:700 var(--sv-ui-font) Arial,sans-serif!important;box-shadow:0 2px 9px #0007!important;backdrop-filter:blur(7px)}
+body #svDrawDock #svDrawBar{position:static!important;transform:none!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;width:min(178px,calc(var(--sv-vw) * .43))!important;max-height:calc(var(--sv-vh) - 160px)!important;overflow-y:auto!important;overflow-x:hidden!important;display:none!important;flex-direction:column!important;flex-wrap:nowrap!important;align-items:stretch!important;gap:5px!important;padding:8px!important;margin:0!important;border-radius:12px!important;background:rgba(7,31,21,.78)!important;backdrop-filter:blur(12px)!important;box-shadow:0 4px 18px #0009!important}
+body #svDrawDock.open #svDrawBar{display:flex!important}
+body #svDrawDock #svDrawBar button{width:100%!important;min-height:var(--sv-touch)!important;height:auto!important;white-space:normal!important;text-align:center!important;font-size:var(--sv-ui-font)!important;padding:6px!important;flex:0 0 auto!important}
+body #svDrawDock #svDrawBar input[type=color]{width:100%!important;min-height:var(--sv-touch)!important;height:var(--sv-touch)!important;flex:0 0 auto!important}
+#svDrawInfo{display:none!important}
+@media(max-width:700px){#svBrandToggle{right:auto!important;left:6px!important;bottom:calc(env(safe-area-inset-bottom) + 76px)!important;min-height:32px!important}}
+</style>
+<script id="svMobileV7ResponsiveDrawScript">
+(()=>{
+ const init=()=>{
+  const bar=document.getElementById('svDrawBar');if(!bar||document.getElementById('svDrawDock'))return;
+  const dock=document.createElement('div');dock.id='svDrawDock';
+  const toggle=document.createElement('button');toggle.type='button';toggle.id='svDrawToggle';toggle.textContent='✎ 그리기';toggle.setAttribute('aria-expanded','false');toggle.setAttribute('aria-controls','svDrawBar');
+  bar.parentNode.insertBefore(dock,bar);dock.append(bar,toggle);
+  function setOpen(open){dock.classList.toggle('open',open);toggle.textContent=open?'✕ 닫기':'✎ 그리기';toggle.setAttribute('aria-expanded',String(open));}
+  toggle.addEventListener('click',()=>setOpen(!dock.classList.contains('open')));
+  function measure(){
+   const vp=window.visualViewport;
+   const w=vp?.width||window.innerWidth,h=vp?.height||window.innerHeight;
+   const scale=Math.min(w/390,h/780);
+   const touch=Math.max(40,Math.min(48,Math.round(44*scale)));
+   const font=Math.max(12,Math.min(15,Math.round(13*scale)));
+   const root=document.documentElement;
+   root.style.setProperty('--sv-vw',w+'px');root.style.setProperty('--sv-vh',h+'px');
+   root.style.setProperty('--sv-touch',touch+'px');root.style.setProperty('--sv-ui-font',font+'px');
+   root.style.setProperty('--sv-right',Math.max(5,Math.round(w*.015))+'px');
+   // Keep the closed toggle away from the bottom camera/replay controls.
+   root.style.setProperty('--sv-top',Math.max(70,Math.min(Math.round(h*.36),h-200))+'px');
+  }
+  measure();window.addEventListener('resize',measure);window.addEventListener('orientationchange',measure);
+  window.visualViewport?.addEventListener('resize',measure);
+ };
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
+})();
+</script>
+
+<!-- V7 ORIGINAL: two independent translucent video buttons, no changes to detection/capture -->
+<style id="svV7TwoButtonsMeasured">
+#mainVideoStage{position:relative!important}
+#svVideoFileDock{position:absolute!important;top:clamp(32px,5.5vh,48px)!important;left:clamp(6px,1vw,14px)!important;z-index:1500!important;display:inline-flex!important;align-items:center!important;gap:clamp(4px,.5vw,8px)!important;width:max-content!important;max-width:calc(100% - 70px)!important;padding:clamp(3px,.4vw,5px)!important;border:1px solid rgba(132,183,147,.28)!important;border-radius:10px!important;background:rgba(5,26,17,.54)!important;backdrop-filter:blur(7px);pointer-events:auto!important}
+#svVideoFileDock #svMobileLibraryBar,#svVideoFileDock #svMobileSaveBar{display:contents!important}
+#svVideoFileDock button{font:700 clamp(11px,1.2vw,14px) Arial,sans-serif!important;min-height:clamp(32px,4.2vh,42px)!important;min-width:0!important;width:auto!important;max-width:46vw!important;padding:5px clamp(8px,1vw,14px)!important;margin:0!important;border:1px solid rgba(142,181,152,.35)!important;border-radius:8px!important;background:rgba(22,64,46,.85)!important;color:#f3faf4!important;white-space:nowrap!important;box-shadow:none!important}
+#svVideoFileDock #svMobileSaveBtn:disabled{opacity:.48!important;color:#c3cec6!important}
+#svVideoFileDock .svFileLabel,#svVideoFileDock #svMobileSaveStatus{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip-path:inset(50%)!important;white-space:nowrap!important}
+@media(max-width:600px){#svVideoFileDock{top:clamp(28px,5vh,38px)!important;left:5px!important;gap:4px!important}#svVideoFileDock button{font-size:clamp(10px,2.7vw,12px)!important;padding:5px 8px!important;min-height:36px!important}}
+</style>
+<script id="svV7TwoButtonsMeasuredScript">
+(()=>{
+ const init=()=>{
+  const stage=document.getElementById('mainVideoStage');
+  const library=document.getElementById('svMobileLibraryBar');
+  const save=document.getElementById('svMobileSaveBar');
+  if(!stage||!library||!save||document.getElementById('svVideoFileDock'))return;
+  const dock=document.createElement('div');dock.id='svVideoFileDock';
+  dock.setAttribute('aria-label','영상 열기 및 촬영 영상 저장');
+  stage.appendChild(dock);dock.append(library,save);
+  const open=library.querySelector('button');
+  if(open)open.textContent='📁 내 동영상 열기';
+  const saveButton=document.getElementById('svMobileSaveBtn');
+  if(saveButton)saveButton.textContent='촬영 영상 저장';
+  // Preserve original file picker and save event handlers; only move their parent nodes.
+ };
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
+})();
+</script>
 </body>
 </html>
