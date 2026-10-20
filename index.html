@@ -805,7 +805,7 @@ function stopRecordingSoon(){
 }
 
 // ADDRESS diagnostic display only; scoring and READY thresholds are unchanged.
-const svAddressHistory={samples:0,best:null,last:null};
+const svAddressHistory={samples:0,best:null,last:null,bestStable:null,stableStart:0,longestHold:0,stableFrames:0,stableCount:0};
 function svAddressSnapshot(lm,check,m){
   const needed=[11,12,15,16,23,24,25,26,27,28];
   const names={11:'왼어깨',12:'오른어깨',15:'왼손목',16:'오른손목',23:'왼골반',24:'오른골반',25:'왼무릎',26:'오른무릎',27:'왼발목',28:'오른발목'};
@@ -844,20 +844,37 @@ function svAddressDiagnostic(lm,check,m){
     controls.innerHTML='<button type="button" id="svAddressClear">기록 초기화</button><button type="button" id="svAddressCopy">결과 복사</button>';
     dock.appendChild(controls);
     controls.querySelector('#svAddressClear').addEventListener('click',()=>{
-      svAddressHistory.samples=0;svAddressHistory.best=null;svAddressHistory.last=null;
+      svAddressHistory.samples=0;svAddressHistory.best=null;svAddressHistory.last=null;svAddressHistory.bestStable=null;svAddressHistory.stableStart=0;svAddressHistory.longestHold=0;svAddressHistory.stableFrames=0;svAddressHistory.stableCount=0;
       svAddressDiagnostic(null,{score:0,ok:false}, {stability:NaN,pelvisSpeed:NaN,ankleSpeed:NaN},false);
     });
     controls.querySelector('#svAddressCopy').addEventListener('click',()=>{
-      const report='SV MOBILE ADDRESS 진단\n'+(svAddressHistory.best?'최고 점수 '+svAddressHistory.best.score+'/7 · '+svAddressHistory.best.timestamp+'\n'+svAddressHistory.best.lines:'저장된 사람 인식 기록 없음');
+      const report='SV MOBILE ADDRESS 진단\n'+(svAddressHistory.best?'최고 점수 '+svAddressHistory.best.score+'/7 · '+svAddressHistory.best.timestamp+'\n'+svAddressHistory.best.lines:'저장된 사람 인식 기록 없음')+'\n\n최장 안정 유지 '+Math.round(svAddressHistory.longestHold)+' / '+STABLE_MS+' ms\n'+(svAddressHistory.bestStable?'최장 안정 구간 '+svAddressHistory.bestStable.timestamp+'\n'+svAddressHistory.bestStable.lines:'안정 조건 동시 충족 기록 없음');
       if(navigator.clipboard?.writeText)navigator.clipboard.writeText(report).catch(()=>{});
     });
   }
   const snapshot=svAddressSnapshot(lm,check,m);
+  if(!lm) {svAddressHistory.stableStart=0;svAddressHistory.stableFrames=0;}
   // Preserve last valid full-body measurement even after the golfer leaves the frame.
   if(lm && check.checks && armed){
     svAddressHistory.samples++;
     svAddressHistory.last=snapshot;
     if(!svAddressHistory.best || snapshot.score>svAddressHistory.best.score)svAddressHistory.best=snapshot;
+    // Capture stable address intervals independently of the READY state machine.
+    const eligible=check.ok && m.stability<0.020 &&
+      m.pelvisSpeed<MAX_PELVIS_SPEED && m.ankleSpeed<MAX_ANKLE_SPEED;
+    if(eligible){
+      const t=performance.now();
+      if(!svAddressHistory.stableStart)svAddressHistory.stableStart=t;
+      const held=t-svAddressHistory.stableStart;
+      svAddressHistory.stableFrames++;
+      svAddressHistory.stableCount++;
+      if(held>svAddressHistory.longestHold)svAddressHistory.longestHold=held;
+      if(!svAddressHistory.bestStable || held>svAddressHistory.bestStable.held){
+        svAddressHistory.bestStable={...snapshot,held,stableFrames:svAddressHistory.stableFrames};
+      }
+    }else{
+      svAddressHistory.stableStart=0;svAddressHistory.stableFrames=0;
+    }
   }
   const detail=dock.querySelector('#svAddressDiagDetail');
   const best=svAddressHistory.best;
@@ -868,6 +885,9 @@ function svAddressDiagnostic(lm,check,m){
     '\n현재: '+snapshot.lines+
     '\n\n━━ 자동 보존된 최고 점수 ━━\n'+
     (best?best.timestamp+'\n'+best.lines:'아직 저장된 자세 없음')+
+    '\n\n━━ 가장 안정적인 어드레스 구간 ━━\n'+
+    '동시 충족 프레임 '+svAddressHistory.stableCount+'회 · 최장 연속 '+Math.round(svAddressHistory.longestHold)+' / '+STABLE_MS+' ms\n'+
+    (svAddressHistory.bestStable?svAddressHistory.bestStable.timestamp+'\n'+svAddressHistory.bestStable.lines:'안정 조건 동시 충족 기록 없음')+
     '\nLOCK '+(addressLocked?'ON':'OFF');
 }
 
