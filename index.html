@@ -505,7 +505,7 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important}
 <option value="">기본 카메라 (전면)</option>
 </select>
 <button id="connect" class="white">카메라 연결</button>
-  <button id="arm" class="green" disabled>자동촬영 시작</button>
+  <button id="arm" class="green" disabled>스윙감지 ON</button>
   <button id="disconnect" class="dark" disabled>카메라 해제</button>
 <button id="liveViewBtn" class="white">LIVE 보기</button>
 <button id="exitBtn" class="dark" type="button">종료</button>
@@ -1029,7 +1029,7 @@ $('connect').onclick=async()=>{
 
 $('arm').onclick=()=>{
   armed=!armed;ready=false;addressLocked=false;stableSince=0;swingStarted=false;lastPose=null;lastPoseTime=0;
-  $('arm').textContent=armed?'자동촬영 정지':'자동촬영 시작';
+  $('arm').textContent=armed?'스윙감지 OFF':'스윙감지 ON';
   $('state').className='state wait';
   $('addressState').textContent='OFF';$('state').textContent=armed?'사람/어드레스 대기':'대기';
   $('status').textContent=armed?'타석에 서서 어드레스를 잡으세요.':'관절감지 OFF';
@@ -2056,9 +2056,10 @@ body #svCameraRotateBtn{position:fixed!important;top:calc(env(safe-area-inset-to
   const bar=document.getElementById('svFloatingCamera');
   const raw=document.getElementById('raw');
   const stage=document.getElementById('liveStage');
+  const joints=document.getElementById('view');
   if(!bar||!raw||!stage||document.getElementById('svCameraRotateBtn'))return;
   const btn=document.createElement('button');
-  btn.type='button';btn.id='svCameraRotateBtn';btn.textContent='↻ 90°';btn.title='카메라 화면을 90도씩 회전 (관절 분석 방향은 변경하지 않음)';
+  btn.type='button';btn.id='svCameraRotateBtn';btn.textContent='↻ 90°';btn.title='카메라 영상과 관절 표시를 함께 90도씩 회전';
   const select=document.getElementById('cameraSelect');
   if(select)select.insertAdjacentElement('afterend',btn);else bar.appendChild(btn);
   let angle=90;
@@ -2068,6 +2069,11 @@ body #svCameraRotateBtn{position:fixed!important;top:calc(env(safe-area-inset-to
    raw.style.setProperty('width',(quarter?h:w)+'px','important');
    raw.style.setProperty('height',(quarter?w:h)+'px','important');
    raw.style.setProperty('transform','translate(-50%,-50%) rotate('+angle+'deg)','important');
+   // Pose input remains at its verified 90-degree normalization; rotate only its display overlay.
+   if(joints){
+    joints.style.setProperty('transform','rotate('+(angle-90)+'deg)','important');
+    joints.style.setProperty('transform-origin','center center','important');
+   }
    btn.textContent='↻ '+angle+'°';
   }
   btn.addEventListener('click',()=>{angle=(angle+90)%360;apply()});
