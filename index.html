@@ -806,6 +806,7 @@ function stopRecordingSoon(){
 
 // ADDRESS diagnostic display only; scoring and READY thresholds are unchanged.
 const svAddressHistory={samples:0,best:null,last:null,bestStable:null,stableStart:0,longestHold:0,stableFrames:0,stableCount:0};
+window.svAddressHistory=svAddressHistory;
 function svAddressSnapshot(lm,check,m){
   const needed=[11,12,15,16,23,24,25,26,27,28];
   const names={11:'왼어깨',12:'오른어깨',15:'왼손목',16:'오른손목',23:'왼골반',24:'오른골반',25:'왼무릎',26:'오른무릎',27:'왼발목',28:'오른발목'};
@@ -857,6 +858,8 @@ function svAddressDiagnostic(lm,check,m){
   // Preserve last valid full-body measurement even after the golfer leaves the frame.
   if(lm && check.checks && armed){
     svAddressHistory.samples++;
+    snapshot.metrics={stability:m.stability,pelvisSpeed:m.pelvisSpeed,ankleSpeed:m.ankleSpeed};
+    snapshot.eligible=check.ok && m.stability<0.020 && m.pelvisSpeed<MAX_PELVIS_SPEED && m.ankleSpeed<MAX_ANKLE_SPEED;
     svAddressHistory.last=snapshot;
     if(!svAddressHistory.best || snapshot.score>svAddressHistory.best.score)svAddressHistory.best=snapshot;
     // Capture stable address intervals independently of the READY state machine.
@@ -2269,6 +2272,93 @@ body #svCameraRotateBtn{top:calc(env(safe-area-inset-top,0px) + 107px)!important
  };
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});
  else init();
+})();
+</script>
+
+<!-- SV MOBILE camera focus A/B diagnostics: isolated from READY and MediaPipe logic -->
+<style id="svFocusABStyle">
+#svFocusAB{position:fixed;right:6px;bottom:calc(env(safe-area-inset-bottom,0px) + 66px);z-index:3700;max-width:min(260px,62vw);background:rgba(7,32,22,.88);color:#fff;border:1px solid #7ca58a;border-radius:8px;padding:5px 7px;font:11px/1.4 Arial,sans-serif;box-shadow:0 2px 8px #0006}
+#svFocusAB button{font:700 11px Arial,sans-serif!important;background:#205e43!important;color:white!important;border:1px solid #8ab69b!important;border-radius:5px!important;padding:5px 7px!important;min-height:28px!important}
+#svFocusAB .svFocusRow{display:flex;gap:4px;flex-wrap:wrap;margin-top:5px}
+#svFocusAB pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:5px 0 0;font:10px/1.4 monospace}
+#svFocusAB.svFocusCollapsed pre,#svFocusAB.svFocusCollapsed .svFocusRow{display:none}
+</style>
+<script id="svFocusABScript">
+(()=>{
+const init=()=>{
+ const panel=document.createElement('div');
+ panel.id='svFocusAB';panel.className='svFocusCollapsed';
+ panel.innerHTML='<button id="svFocusToggle" type="button">AF 진단 ▸</button><div class="svFocusRow"><button id="svFocusProbe" type="button">지원 확인</button><button id="svFocusAuto" type="button">자동초점</button><button id="svFocusLock" type="button">초점 고정</button><button id="svFocusClear" type="button">비교 초기화</button><button id="svFocusCopy" type="button">결과 복사</button></div><pre id="svFocusInfo">카메라 연결 후 지원 확인</pre>';
+ document.body.appendChild(panel);
+ const get=id=>document.getElementById(id);
+ const info=get('svFocusInfo');
+ let mode='미확인',supported='미확인',message='카메라 연결 후 지원 확인';
+ const sessions={auto:{n:0,eligible:0,stable:0,pelvis:0,ankle:0},manual:{n:0,eligible:0,stable:0,pelvis:0,ankle:0}};
+ let lastSamples=0,lastTrack=null,lastMode=null;
+ const track=()=>document.getElementById('raw')?.srcObject?.getVideoTracks?.()[0]||null;
+ const caps=t=>{try{return t?.getCapabilities?.()||{}}catch(e){return {}}};
+ const settings=t=>{try{return t?.getSettings?.()||{}}catch(e){return {}}};
+ const fm=v=>Number.isFinite(v)?v.toFixed(3):'—';
+ const row=(key,name)=>{const x=sessions[key];return name+' '+x.n+'프레임 · 동시통과 '+x.eligible+' · 안정도 '+(x.n?fm(x.stable/x.n):'—')+' · 골반 '+(x.n?fm(x.pelvis/x.n):'—')+' · 발목 '+(x.n?fm(x.ankle/x.n):'—')};
+ const render=()=>{
+  const t=track(),c=caps(t),st=settings(t);
+  const active=st.focusMode||'미노출';
+  info.textContent='초점 제어 '+supported+' · 선택 '+mode+' · 실제설정 '+active+
+   '\\n지원 모드 '+(Array.isArray(c.focusMode)?c.focusMode.join(', '):'정보 없음')+
+   '\\n초점거리 '+(Number.isFinite(st.focusDistance)?st.focusDistance:'미노출')+
+   '\\n'+message+'\\n'+row('auto','AUTO')+'\\n'+row('manual','LOCK')+
+   '\\n※ 평균은 기록 프레임 기준, 동일 자세·거리로 비교';
+ };
+ get('svFocusToggle').onclick=()=>{panel.classList.toggle('svFocusCollapsed');get('svFocusToggle').textContent=panel.classList.contains('svFocusCollapsed')?'AF 진단 ▸':'AF 진단 ▾';render()};
+ get('svFocusProbe').onclick=()=>{
+  const t=track();if(!t){message='카메라 미연결';render();return}
+  const c=caps(t);
+  supported=Array.isArray(c.focusMode)?c.focusMode.join('/'):'초점 모드 제어 미노출';
+  message='지원 기능 조회 완료 (초점은 변경하지 않음)';
+  render();
+ };
+ const setMode=async target=>{
+  const t=track();if(!t){message='카메라 미연결';render();return}
+  const c=caps(t),options=Array.isArray(c.focusMode)?c.focusMode:[];
+  supported=options.length?options.join('/'):'초점 모드 제어 미지원';
+  if(!options.includes(target)){message=target+' 미지원 · 기존 초점 유지';render();return}
+  const before=t.getConstraints?.()||{};
+  try{
+   // Preserve the current video constraints; modify only focus mode.
+   await t.applyConstraints({...before,advanced:[...(before.advanced||[]),{focusMode:target}]});
+   const actual=settings(t).focusMode;
+   if(actual!==target){message='적용 요청 후 실제 초점모드 확인 불가/불일치: '+(actual||'미노출');mode='미확인'}
+   else{mode=target==='continuous'?'auto':'manual';message='적용 확인: '+target}
+  }catch(e){message='초점 변경 실패: '+(e?.name||'Error');}
+  render();
+ };
+ get('svFocusAuto').onclick=()=>setMode('continuous');
+ get('svFocusLock').onclick=()=>setMode('manual');
+ get('svFocusClear').onclick=()=>{for(const x of Object.values(sessions)){x.n=0;x.eligible=0;x.stable=0;x.pelvis=0;x.ankle=0}lastSamples=window.svAddressHistory?.samples||0;message='비교 기록 초기화';render()};
+ get('svFocusCopy').onclick=()=>{
+  const t=track();const report='SV MOBILE 초점 A/B 진단\\n'+info.textContent+'\\n'+row('auto','AUTO')+'\\n'+row('manual','LOCK');
+  if(navigator.clipboard?.writeText)navigator.clipboard.writeText(report).then(()=>{message='복사 완료';render()}).catch(()=>{message='복사 실패';render()});
+ };
+ // Observe read-only diagnostic samples; never affect READY thresholds.
+ setInterval(()=>{
+  const t=track();if(t!==lastTrack){lastTrack=t;mode='미확인';supported='미확인';lastSamples=window.svAddressHistory?.samples||0;message=t?'새 카메라 연결됨 · 지원 확인 필요':'카메라 미연결';render()}
+  const h=window.svAddressHistory;
+  if(!h||!t)return;
+  if(h.samples<lastSamples)lastSamples=h.samples;
+  if(h.samples===lastSamples)return;
+  lastSamples=h.samples;
+  if(mode!=='auto'&&mode!=='manual')return;
+  const snap=h.last;
+  if(!snap||!snap.metrics)return;
+  const x=sessions[mode],m=snap.metrics;
+  if(![m.stability,m.pelvisSpeed,m.ankleSpeed].every(Number.isFinite))return;
+  x.n++;x.stable+=m.stability;x.pelvis+=m.pelvisSpeed;x.ankle+=m.ankleSpeed;
+  if(snap.eligible)x.eligible++;
+  if(!panel.classList.contains('svFocusCollapsed'))render();
+ },250);
+ render();
+};
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 })();
 </script>
 </body>
