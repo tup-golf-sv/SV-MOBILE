@@ -804,23 +804,12 @@ function stopRecordingSoon(){
   setTimeout(()=>{if(recorder&&recorder.state==='recording') recorder.stop()},SWING_CAPTURE_MS);
 }
 
-// ADDRESS diagnostic display only. No changes to scoring, thresholds or state.
-function svAddressDiagnostic(lm,check,m){
-  let dock=document.getElementById('svAddressDiag');
-  if(!dock){
-    dock=document.createElement('div');dock.id='svAddressDiag';
-    dock.innerHTML='<button id="svAddressDiagToggle" type="button" aria-expanded="false">LOCK 진단 ▸</button><div id="svAddressDiagDetail" hidden></div>';
-    document.body.appendChild(dock);
-    dock.querySelector('button').addEventListener('click',()=>{
-      const detail=dock.querySelector('#svAddressDiagDetail');
-      detail.hidden=!detail.hidden;
-      dock.querySelector('button').textContent=detail.hidden?'LOCK 진단 ▸':'LOCK 진단 ▾';
-      dock.querySelector('button').setAttribute('aria-expanded',String(!detail.hidden));
-    });
-  }
+// ADDRESS diagnostic display only; scoring and READY thresholds are unchanged.
+const svAddressHistory={samples:0,best:null,last:null};
+function svAddressSnapshot(lm,check,m){
   const needed=[11,12,15,16,23,24,25,26,27,28];
-  const missing=needed.filter(i=>!lm?.[i]||(lm[i].visibility!=null&&lm[i].visibility<0.20));
   const names={11:'왼어깨',12:'오른어깨',15:'왼손목',16:'오른손목',23:'왼골반',24:'오른골반',25:'왼무릎',26:'오른무릎',27:'왼발목',28:'오른발목'};
+  const missing=needed.filter(i=>!lm?.[i]||(lm[i].visibility!=null&&lm[i].visibility<0.20));
   const fail=[];
   if(missing.length)fail.push('관절 부족: '+missing.map(i=>names[i]).join(', '));
   if(!check.ok)fail.push(check.obviousOneLeg?'하체 비대칭':'어드레스 점수 부족');
@@ -829,15 +818,57 @@ function svAddressDiagnostic(lm,check,m){
   if(!(m.ankleSpeed<MAX_ANKLE_SPEED))fail.push('발목 이동 초과');
   if(!fail.length)fail.push('자세 유지시간 확인 중');
   const fmt=v=>Number.isFinite(v)?v.toFixed(3):'UNKNOWN';
-  dock.querySelector('#svAddressDiagToggle').textContent='LOCK 진단 '+(armed?'ON':'OFF')+' · '+check.score+'/7 '+(dock.querySelector('#svAddressDiagDetail').hidden?'▸':'▾');
-  dock.querySelector('#svAddressDiagDetail').textContent=
-    '감지 '+(armed?'ON':'OFF')+' · 쿨다운 '+(cooldown?'ON':'OFF')+'\n점수 '+check.score+'/7 · 하체 '+(missing.some(i=>i>=25)?'인식 부족':'인식 확인')+
-    '\n안정도 '+fmt(m.stability)+' / 0.020'+
-    '\n골반속도 '+fmt(m.pelvisSpeed)+' / '+MAX_PELVIS_SPEED+
-    '\n발목속도 '+fmt(m.ankleSpeed)+' / '+MAX_ANKLE_SPEED+
-    '\n7개 판정:\n'+(check.checks?check.checks.map(c=>(c[1]?'✓ ':'× ')+c[0]+' '+(Number.isFinite(c[2])?c[2].toFixed(3):'?')+' ('+c[3]+')').join('\n'):'관절 데이터 부족')+
-    '\nLOCK '+(addressLocked?'ON':'OFF')+
-    '\n차단: '+(addressLocked?'없음':fail.join(' · '));
+  const lines=[
+    '점수 '+check.score+'/7 · 하체 '+(missing.some(i=>i>=25)?'인식 부족':'인식 확인'),
+    '안정도 '+fmt(m.stability)+' / 0.020',
+    '골반속도 '+fmt(m.pelvisSpeed)+' / '+MAX_PELVIS_SPEED,
+    '발목속도 '+fmt(m.ankleSpeed)+' / '+MAX_ANKLE_SPEED,
+    '7개 판정:',
+    ...(check.checks?check.checks.map(c=>(c[1]?'✓ ':'× ')+c[0]+' '+(Number.isFinite(c[2])?c[2].toFixed(3):'?')+' ('+c[3]+')'):['관절 데이터 부족']),
+    '차단: '+fail.join(' · ')
+  ];
+  return {score:check.score,valid:!!check.checks,lines:lines.join('\\n'),timestamp:new Date().toLocaleTimeString('ko-KR')};
+}
+function svAddressDiagnostic(lm,check,m){
+  let dock=document.getElementById('svAddressDiag');
+  if(!dock){
+    dock=document.createElement('div');dock.id='svAddressDiag';
+    dock.innerHTML='<button id="svAddressDiagToggle" type="button" aria-expanded="false">LOCK 진단 ▸</button><div id="svAddressDiagDetail" hidden></div>';
+    document.body.appendChild(dock);
+    dock.querySelector('#svAddressDiagToggle').addEventListener('click',()=>{
+      const detail=dock.querySelector('#svAddressDiagDetail');
+      detail.hidden=!detail.hidden;
+      svAddressDiagnostic(lm,check,m,false);
+    });
+    const controls=document.createElement('div');controls.id='svAddressHistoryControls';
+    controls.innerHTML='<button type="button" id="svAddressClear">기록 초기화</button><button type="button" id="svAddressCopy">결과 복사</button>';
+    dock.appendChild(controls);
+    controls.querySelector('#svAddressClear').addEventListener('click',()=>{
+      svAddressHistory.samples=0;svAddressHistory.best=null;svAddressHistory.last=null;
+      svAddressDiagnostic(null,{score:0,ok:false}, {stability:NaN,pelvisSpeed:NaN,ankleSpeed:NaN},false);
+    });
+    controls.querySelector('#svAddressCopy').addEventListener('click',()=>{
+      const report='SV MOBILE ADDRESS 진단\\n'+(svAddressHistory.best?'최고 점수 '+svAddressHistory.best.score+'/7 · '+svAddressHistory.best.timestamp+'\\n'+svAddressHistory.best.lines:'저장된 사람 인식 기록 없음');
+      if(navigator.clipboard?.writeText)navigator.clipboard.writeText(report).catch(()=>{});
+    });
+  }
+  const snapshot=svAddressSnapshot(lm,check,m);
+  // Preserve last valid full-body measurement even after the golfer leaves the frame.
+  if(lm && check.checks && armed){
+    svAddressHistory.samples++;
+    svAddressHistory.last=snapshot;
+    if(!svAddressHistory.best || snapshot.score>svAddressHistory.best.score)svAddressHistory.best=snapshot;
+  }
+  const detail=dock.querySelector('#svAddressDiagDetail');
+  const best=svAddressHistory.best;
+  const head=dock.querySelector('#svAddressDiagToggle');
+  head.textContent='LOCK 진단 '+(armed?'ON':'OFF')+' · 현재 '+check.score+'/7 · 최고 '+(best?best.score+'/7':'없음')+(detail.hidden?' ▸':' ▾');
+  detail.textContent=
+    '감지 '+(armed?'ON':'OFF')+' · 기록 '+svAddressHistory.samples+'회'+
+    '\\n현재: '+snapshot.lines+
+    '\\n\\n━━ 자동 보존된 최고 점수 ━━\\n'+
+    (best?best.timestamp+'\\n'+best.lines:'아직 저장된 자세 없음')+
+    '\\nLOCK '+(addressLocked?'ON':'OFF');
 }
 
 async function onResults(results){
@@ -2195,6 +2226,10 @@ body #svCameraRotateBtn{top:calc(env(safe-area-inset-top,0px) + 107px)!important
 #svAddressDiagToggle{display:block!important;min-height:27px!important;padding:4px 8px!important;font:700 11px Arial,sans-serif!important;color:#f0f8f2!important;background:transparent!important;border:0!important}
 #svAddressDiagDetail{padding:3px 8px 8px;white-space:pre-line;overflow-wrap:anywhere}
 #svAddressDiagDetail[hidden]{display:none!important}
+#svAddressHistoryControls{display:flex;gap:5px;padding:3px 6px 7px}
+#svAddressHistoryControls button{font:700 10px Arial,sans-serif!important;min-height:28px!important;padding:4px 6px!important;color:#fff!important;background:rgba(29,89,62,.92)!important;border:1px solid #7ca58a!important;border-radius:5px!important}
+#svAddressDiag:has(#svAddressDiagDetail:not([hidden])){max-height:70dvh;overflow:auto}
+
 @media(max-height:440px){#svAddressDiag{bottom:8px;max-width:220px;font-size:10px}}
 </style>
 </body>
