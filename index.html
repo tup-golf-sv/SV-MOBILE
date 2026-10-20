@@ -1,0 +1,1891 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#07140f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>T.UP SV MOBILE | 스윙 분석</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#07140f;color:#f4f7f5;font-family:Arial,"Noto Sans KR",sans-serif}
+.wrap{max-width:1180px;margin:auto;padding:18px}
+.panel{background:#0d2118;border:1px solid #29463a;border-radius:16px;padding:11px;margin:8px 0}
+h1{margin:0 0 5px}
+.sub,.status{color:#bdd0c6}
+.stage{position:relative;height:min(58vh,640px);background:#000;border-radius:12px;overflow:hidden}
+#view{position:absolute;inset:0;width:100%;height:100%}
+#overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:72px;font-weight:900;background:rgba(0,0,0,.14);text-shadow:0 3px 12px #000}
+.controls{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;align-items:center}
+button{height:32px;padding:3px 11px;border:0;border-radius:8px;font-size:14px;font-weight:800;cursor:pointer;line-height:1}
+button:disabled{opacity:.4}
+.white{background:#f4f6f5}.green{background:#28714d;color:white}.dark{background:#34493f;color:white}
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;margin-top:12px}
+.stat{background:#10291e;padding:12px;border-radius:10px;text-align:center}
+.label{color:#bdd0c6}.num{font-size:25px;font-weight:900}
+.state{font-size:24px;font-weight:900;margin-top:11px}
+.wait{color:#e8d38a}.ready{color:#8fe0ad}.impact{color:#ffb36b}.done{color:#9bd6ff}
+#replay{display:none}
+#replayCanvas{position:absolute;inset:0;width:100%;height:100%;background:#000}
+.note{font-size:14px;color:#9eb5aa;margin-top:8px}
+@media(max-width:720px){.stats{grid-template-columns:1fr 1fr}#overlay{font-size:48px}}
+
+#replay{display:none}
+
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+
+<style id="svDirectVideoPreviewFix">
+#raw{
+  display:block!important;
+  position:absolute!important;
+  left:50%!important;
+  top:50%!important;
+  width:auto!important;
+  height:auto!important;
+  max-width:none!important;
+  max-height:none!important;
+  transform:translate(-50%,-50%) rotate(90deg)!important;
+  transform-origin:center center!important;
+  object-fit:contain!important;
+  z-index:1!important;
+  background:#000!important;
+}
+#view{
+  z-index:2!important;
+  pointer-events:none!important;
+  background:transparent!important;
+}
+#overlay{z-index:3!important}
+</style>
+
+
+<style id="svLeftLiveRightReplayFix">
+#liveStage{
+  position:relative!important;
+  overflow:hidden!important;
+  background:#000!important;
+}
+#liveStage #raw{
+  display:block!important;
+  position:absolute!important;
+  left:50%!important;
+  top:50%!important;
+  width:auto!important;
+  height:auto!important;
+  max-width:none!important;
+  max-height:none!important;
+  transform:translate(-50%,-50%) rotate(90deg)!important;
+  transform-origin:center center!important;
+  object-fit:contain!important;
+  z-index:1!important;
+}
+#liveStage #view{
+  position:absolute!important;
+  inset:0!important;
+  width:100%!important;
+  height:100%!important;
+  z-index:2!important;
+  pointer-events:none!important;
+  background:transparent!important;
+}
+#liveStage #overlay{z-index:3!important}
+#mainVideoStage{
+  position:relative!important;
+  overflow:hidden!important;
+  background:#000!important;
+}
+#mainVideoStage #replayCanvas{
+  position:absolute!important;
+  inset:0!important;
+  width:100%!important;
+  height:100%!important;
+  z-index:1!important;
+  background:#000!important;
+}
+</style>
+
+
+
+
+
+<style id="svV121DualReplayUI">
+html,body{width:100%!important;height:100%!important;overflow:hidden!important}
+body{background:#06140e!important}
+.wrap{
+  width:100%!important;max-width:none!important;height:100vh!important;
+  margin:0!important;padding:4px!important;
+  display:grid!important;
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;
+  grid-template-rows:auto minmax(0,1fr)!important;
+  gap:4px!important;
+  overflow:hidden!important;
+}
+
+/* 기존 제목은 공간 확보를 위해 숨김 */
+.wrap>h1,.wrap>.sub{display:none!important}
+
+/* LIVE는 화면에 표시하지 않고, 카메라/감지 제어만 상단 얇은 바에 남김 */
+#svLivePanel{
+  grid-column:1 / -1!important;grid-row:1!important;
+  margin:0!important;padding:3px 5px!important;
+  min-height:34px!important;
+  display:block!important;
+  background:#0b2016!important;
+  border-radius:9px!important;
+}
+#svLivePanel #liveStage,
+#svLivePanel .stats,
+#svLivePanel .state,
+#svLivePanel .status,
+#svLivePanel .note{display:none!important}
+#svLivePanel>.controls{
+  display:flex!important;align-items:center!important;justify-content:center!important;
+  flex-wrap:nowrap!important;gap:4px!important;margin:0!important;
+}
+#svLivePanel button,#svLivePanel select{height:28px!important;font-size:11px!important;padding:2px 7px!important}
+.camTag{font-size:11px;font-weight:900;color:#8fe0ad;margin-left:4px}
+
+/* 정면/측면 REPLAY = 정확히 50:50 */
+#svReplayPanel,#svSideReplayPanel{
+  grid-row:2!important;
+  width:100%!important;min-width:0!important;height:100%!important;
+  margin:0!important;padding:4px!important;
+  display:grid!important;
+  grid-template-rows:auto minmax(0,1fr) auto auto auto!important;
+  background:#0b2016!important;border:1px solid #29463a!important;border-radius:10px!important;
+  overflow:hidden!important;
+}
+#svReplayPanel{grid-column:1!important}
+#svSideReplayPanel{grid-column:2!important}
+.dualTitle{
+  height:28px;display:flex;align-items:center;justify-content:space-between;
+  margin:0 0 3px 0;padding:0 5px;
+  color:#ecf7f1;font-size:14px;font-weight:900;
+}
+.dualTitle .camBadge{color:#8fe0ad;font-size:11px}
+
+/* 최대 화면: 컨트롤을 제외한 남은 높이를 영상에 전부 사용 */
+.dualStage,#mainVideoStage{
+  position:relative!important;
+  width:100%!important;height:100%!important;min-height:0!important;max-height:none!important;
+  margin:0!important;padding:0!important;
+  overflow:hidden!important;background:#000!important;border-radius:7px!important;
+}
+#mainVideoStage #replayCanvas,#sideReplayCanvas{
+  position:absolute!important;inset:0!important;
+  width:100%!important;height:100%!important;
+  display:block!important;background:#000!important;
+}
+#frontJointCanvas,#sideJointCanvas{
+  position:absolute!important;inset:0!important;
+  width:100%!important;height:100%!important;
+  z-index:5!important;pointer-events:none!important;
+}
+#sideReplay{display:none!important}
+
+#svReplayPanel .controls,#svSideReplayPanel .controls{
+  display:flex!important;align-items:center!important;justify-content:center!important;
+  flex-wrap:nowrap!important;gap:3px!important;margin-top:3px!important;
+}
+#svReplayPanel button,#svReplayPanel select,
+#svSideReplayPanel button,#svSideReplayPanel select{
+  height:28px!important;min-height:28px!important;padding:2px 7px!important;font-size:10px!important;
+}
+.jointOn{background:#1f8d55!important;color:#fff!important;box-shadow:0 0 0 1px #71d49b inset!important}
+.seekRow{display:flex;align-items:center;gap:5px;margin-top:3px!important;height:22px}
+.seekRow .status{font-size:9px!important}
+.seekRow input{height:16px}
+#result,#sideResult{font-size:9px!important;line-height:1.1!important;min-height:12px!important;margin-top:1px!important}
+
+/* 작은 PC 창에서도 50:50 유지 */
+@media(max-width:900px){
+  .wrap{grid-template-columns:1fr 1fr!important}
+  #svReplayPanel button,#svReplayPanel select,
+  #svSideReplayPanel button,#svSideReplayPanel select{font-size:9px!important;padding:2px 4px!important}
+}
+/* 휴대폰만 세로 */
+@media(max-width:620px){
+  html,body{overflow:auto!important}
+  .wrap{height:auto!important;display:block!important}
+  #svLivePanel{position:sticky;top:0;z-index:20}
+  #svReplayPanel,#svSideReplayPanel{height:78vh!important;margin:4px 0!important}
+}
+</style>
+
+
+<style id="svV122AutoLayout">
+/* V12.2
+   기본: 카메라 1대 = 정면 REPLAY 1화면 전체
+   CAM2 실제 연결 성공 = 정면/측면 REPLAY 50:50
+*/
+.wrap{
+  grid-template-columns:minmax(0,1fr)!important;
+}
+#svReplayPanel{
+  grid-column:1!important;
+}
+#svSideReplayPanel{
+  display:none!important;
+}
+
+/* CAM2가 실제 연결된 경우에만 5:5 */
+.wrap.dual-camera-active{
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;
+}
+.wrap.dual-camera-active #svReplayPanel{
+  grid-column:1!important;
+}
+.wrap.dual-camera-active #svSideReplayPanel{
+  display:grid!important;
+  grid-column:2!important;
+}
+
+/* 1카메라 모드에서는 정면 리플레이를 최대 폭/높이로 */
+.wrap:not(.dual-camera-active) #svReplayPanel{
+  width:100%!important;
+  max-width:none!important;
+}
+.wrap:not(.dual-camera-active) #mainVideoStage{
+  width:100%!important;
+  height:100%!important;
+}
+
+/* 휴대폰: 1카메라면 한 화면 크게.
+   2카메라가 실제 연결된 경우만 2화면으로 표시 */
+@media(max-width:620px){
+  .wrap{
+    display:grid!important;
+    grid-template-columns:minmax(0,1fr)!important;
+    height:100vh!important;
+    overflow:hidden!important;
+  }
+  .wrap:not(.dual-camera-active) #svReplayPanel{
+    height:calc(100vh - 44px)!important;
+    margin:0!important;
+  }
+  .wrap:not(.dual-camera-active) #mainVideoStage{
+    min-height:0!important;
+  }
+
+  .wrap.dual-camera-active{
+    display:grid!important;
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;
+    height:100vh!important;
+  }
+  .wrap.dual-camera-active #svReplayPanel,
+  .wrap.dual-camera-active #svSideReplayPanel{
+    height:calc(100vh - 44px)!important;
+    margin:0!important;
+  }
+}
+
+/* CAM2가 없을 때 측면 선택 UI도 감춤 */
+#sideCamUiTag,#sideCameraSelect{display:none}
+.wrap.side-camera-available #sideCamUiTag,
+.wrap.side-camera-available #sideCameraSelect{display:inline-flex}
+</style>
+
+
+<style id="svV123SingleModeFix">
+.wrap:not(.dual-camera-active){
+  grid-template-columns:minmax(0,1fr)!important;
+}
+.wrap:not(.dual-camera-active) #svReplayPanel{
+  grid-column:1 / -1!important;
+  width:100%!important;
+}
+.wrap:not(.dual-camera-active) #svSideReplayPanel{
+  display:none!important;
+}
+@media(max-width:620px){
+  .wrap.dual-camera-active{
+    grid-template-columns:minmax(0,1fr)!important;
+  }
+  .wrap.dual-camera-active #svSideReplayPanel{
+    display:none!important;
+  }
+  .wrap.dual-camera-active #svReplayPanel{
+    grid-column:1 / -1!important;
+  }
+}
+</style>
+
+
+<style id="svV125LiveFirst">
+.wrap.live-first-mode{grid-template-columns:minmax(0,1fr)!important;grid-template-rows:minmax(0,1fr)!important}
+.wrap.live-first-mode #svLivePanel{grid-column:1/-1!important;grid-row:1!important;height:100vh!important;display:grid!important;grid-template-rows:auto minmax(0,1fr) auto auto!important}
+.wrap.live-first-mode #svLivePanel #liveStage{display:block!important;width:100%!important;height:calc(100vh - 105px)!important;min-height:0!important;max-height:none!important;margin:0!important;background:#000!important}
+.wrap.live-first-mode #svLivePanel .stats,.wrap.live-first-mode #svLivePanel .state,.wrap.live-first-mode #svLivePanel .status{display:flex!important}
+.wrap.live-first-mode #svReplayPanel,.wrap.live-first-mode #svSideReplayPanel{display:none!important}
+.wrap.replay-mode #svLivePanel #liveStage,.wrap.replay-mode #svLivePanel .stats,.wrap.replay-mode #svLivePanel .state,.wrap.replay-mode #svLivePanel .status,.wrap.replay-mode #svLivePanel .note{display:none!important}
+.wrap.replay-mode #svLivePanel{grid-column:1/-1!important;grid-row:1!important;height:auto!important;min-height:34px!important}
+#liveViewBtn{height:28px!important;padding:2px 9px!important;white-space:nowrap!important;font-size:11px!important;font-weight:900!important}
+@media(max-width:620px){
+ .wrap.live-first-mode{height:100vh!important;overflow:hidden!important}
+ .wrap.live-first-mode #svLivePanel{height:100vh!important}
+ .wrap.live-first-mode #svLivePanel #liveStage{height:calc(100vh - 120px)!important}
+}
+</style>
+
+
+<style id="svV126RotateRatioFix">
+#frontRotateBtn,#sideRotateBtn{
+  white-space:nowrap!important;
+  min-width:78px!important;
+  font-weight:900!important;
+}
+#mainVideoStage,#sideVideoStage{
+  background:#000!important;
+}
+</style>
+
+
+<style id="svV128LiveFitCorrected">
+/* V12.8 — 기존 V12.6 구조 유지, LIVE 높이만 viewport 안으로 계산 */
+html,body{width:100%!important;height:100%!important;overflow:hidden!important}
+
+.wrap.live-first-mode{
+  width:100%!important;
+  height:100vh!important;
+  max-height:100vh!important;
+  padding:4px!important;
+  overflow:hidden!important;
+  display:block!important;
+}
+
+.wrap.live-first-mode #svLivePanel{
+  width:100%!important;
+  height:100%!important;
+  max-height:100%!important;
+  margin:0!important;
+  padding:4px!important;
+  overflow:hidden!important;
+  display:block!important;
+}
+
+/* 기존 컨트롤/상태 배치는 그대로 */
+.wrap.live-first-mode #svLivePanel>.controls{
+  display:flex!important;
+  flex-wrap:nowrap!important;
+  justify-content:center!important;
+  align-items:center!important;
+  gap:4px!important;
+  margin:0 0 4px 0!important;
+}
+
+.wrap.live-first-mode #svLivePanel .stats{
+  display:grid!important;
+  grid-template-columns:repeat(5,minmax(0,1fr))!important;
+  gap:4px!important;
+  margin:4px 0 0 0!important;
+}
+
+.wrap.live-first-mode #svLivePanel .stat{
+  padding:5px 2px!important;
+}
+
+.wrap.live-first-mode #svLivePanel .label{
+  font-size:10px!important;
+  line-height:1.05!important;
+}
+.wrap.live-first-mode #svLivePanel .num{
+  font-size:16px!important;
+  line-height:1.05!important;
+}
+.wrap.live-first-mode #svLivePanel .state{
+  font-size:13px!important;
+  line-height:1.1!important;
+  margin:4px 0 0 0!important;
+}
+.wrap.live-first-mode #svLivePanel .status{
+  font-size:10px!important;
+  line-height:1.1!important;
+  margin:2px 0 0 0!important;
+}
+
+/* 안내문은 시작 LIVE 화면에서는 숨겨 공간 확보 */
+.wrap.live-first-mode #svLivePanel .note{display:none!important}
+
+/* LIVE 영상 프레임 자체는 JS가 남은 높이를 계산 */
+.wrap.live-first-mode #svLivePanel #liveStage{
+  display:block!important;
+  width:100%!important;
+  min-height:180px!important;
+  max-height:none!important;
+  margin:0!important;
+  overflow:hidden!important;
+  background:#000!important;
+  border-radius:8px!important;
+}
+
+/* 화면 밖으로 영상이 넘치지 않게 */
+.wrap.live-first-mode #liveStage #raw{
+  position:absolute!important;
+  left:50%!important;
+  top:50%!important;
+  max-width:none!important;
+  max-height:none!important;
+  transform:translate(-50%,-50%) rotate(90deg)!important;
+  transform-origin:center center!important;
+}
+
+@media(max-width:620px){
+  .wrap.live-first-mode{
+    height:100dvh!important;
+    max-height:100dvh!important;
+    padding:2px!important;
+  }
+  .wrap.live-first-mode #svLivePanel{
+    padding:2px!important;
+  }
+  .wrap.live-first-mode #svLivePanel>.controls{
+    overflow-x:auto!important;
+    justify-content:flex-start!important;
+    margin-bottom:2px!important;
+  }
+  .wrap.live-first-mode #svLivePanel .stats{gap:2px!important}
+  .wrap.live-first-mode #svLivePanel .label{font-size:8px!important}
+  .wrap.live-first-mode #svLivePanel .num{font-size:12px!important}
+  .wrap.live-first-mode #svLivePanel .state,
+  .wrap.live-first-mode #svLivePanel .status{font-size:9px!important}
+}
+</style>
+
+
+<style id="svV129ExitButton">
+#exitBtn{
+  height:28px!important;
+  min-height:28px!important;
+  padding:2px 12px!important;
+  white-space:nowrap!important;
+  font-size:11px!important;
+  font-weight:900!important;
+}
+</style>
+
+
+<style id="svV130StartExit">
+#liveViewBtn{
+  background:#1677ff!important;
+  border-color:#1677ff!important;
+  color:#fff!important;
+  font-weight:900!important;
+}
+#liveViewBtn:active{
+  background:#0d5fd3!important;
+}
+#exitBtn{
+  background:#d9363e!important;
+  border-color:#d9363e!important;
+  color:#fff!important;
+  font-weight:900!important;
+}
+#exitBtn:active{
+  background:#b4232a!important;
+}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+<h1>SV · Pose Swing Test V13.0 START EXIT</h1>
+<div class="sub">V11.1B 감지부 고정 · 최근 스윙 반복 · 재생/정지 · 배속 · 프레임 이동</div>
+
+<div class="panel" id="svLivePanel">
+<div class="stage" id="liveStage">
+  <video id="raw" autoplay playsinline muted></video>
+  <canvas id="view"></canvas>
+  <div id="overlay">READY</div>
+</div>
+
+<div class="controls">
+  <select id="cameraSelect" class="white" title="카메라 선택" style="max-width:180px">
+<option value="">기본 카메라</option>
+</select>
+<button id="connect" class="white">카메라 연결</button>
+  <button id="arm" class="green" disabled>관절감지 시작</button>
+  <button id="disconnect" class="dark" disabled>카메라 해제</button>
+<button id="liveViewBtn" class="white">시작</button>
+<button id="exitBtn" class="dark" type="button">종료</button>
+</div>
+
+<div class="stats">
+  <div class="stat"><div class="label">사람 상태</div><div id="presence" class="num">대기</div></div>
+  <div class="stat"><div class="label">관절 안정도</div><div id="stable" class="num">0.00</div></div>
+  <div class="stat"><div class="label">양손 상대속도</div><div id="wristSpeed" class="num">0.00</div></div>
+  <div class="stat"><div class="label">ADDRESS LOCK</div><div id="addressState" class="num">OFF</div></div><div class="stat"><div class="label">스윙 상태</div><div id="swingState" class="num">대기</div></div>
+</div>
+
+<div id="state" class="state wait">대기</div>
+<div id="status" class="status">카메라를 연결하세요.</div>
+<div class="note">※ 이번 V9는 SV 독립 로직입니다. 외부 프로그램의 코드나 통신을 사용하지 않습니다.</div>
+</div>
+
+<div class="panel" id="svReplayPanel">
+<div class="sub">최근 정상 스윙 반복 리플레이 · 90° 보정</div>
+<div class="stage" id="mainVideoStage" style="height:min(56vh,610px)">
+  <canvas id="replayCanvas"></canvas>
+</div>
+<video id="replay" playsinline loop muted></video>
+<div class="controls">
+  <button id="replayPlay" class="white" disabled>재생</button>
+  <button id="replayPause" class="dark" disabled>일시정지</button>
+  <button id="sendA" class="green" disabled>A화면 보내기</button>
+  <button id="sendB" class="green" disabled>B화면 보내기</button>
+  <button id="frontJointBtn" class="dark" disabled>관절보기 OFF</button>
+  <button id="frameBack" class="white" disabled>◀ 1프레임</button>
+  <button id="frameNext" class="white" disabled>1프레임 ▶</button>
+  <div style="position:relative">
+    <button id="speedMenuBtn" class="white" disabled>속도 1.0× ▾</button>
+    <div id="speedMenu" style="display:none;position:absolute;bottom:38px;right:0;z-index:20;background:#10291e;border:1px solid #365647;border-radius:9px;padding:5px;box-shadow:0 8px 24px rgba(0,0,0,.35)">
+      <button class="speedChoice white" data-speed="0.25">0.25×</button>
+      <button class="speedChoice white" data-speed="0.5">0.5×</button>
+      <button class="speedChoice white" data-speed="0.75">0.75×</button>
+      <button class="speedChoice green" data-speed="1">1.0×</button>
+      <button class="speedChoice white" data-speed="1.5">1.5×</button>
+      <button class="speedChoice white" data-speed="2">2.0×</button>
+    </div>
+  </div>
+  <button id="frontRotateBtn" class="white" disabled>영상회전 90°</button>
+</div>
+<div style="display:flex;align-items:center;gap:7px;margin-top:6px">
+  <span id="timeNow" class="status" style="min-width:52px">0.00</span>
+  <input id="replaySeek" type="range" min="0" max="1000" value="0" disabled style="flex:1">
+  <span id="timeTotal" class="status" style="min-width:52px;text-align:right">0.00</span>
+</div>
+<div id="result" class="status">아직 정상 스윙 영상이 없습니다.</div>
+</div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const raw=$('raw'), view=$('view'), ctx=view.getContext('2d');
+const poseInput=document.createElement('canvas'), poseInputCtx=poseInput.getContext('2d');
+const replay=$('replay'), replayCanvas=$('replayCanvas'), rctx=replayCanvas.getContext('2d');
+
+let stream=null, pose=null, armed=false, processing=false, raf=null;
+let recorder=null, chunks=[], recording=false;
+let latestReplayBlob=null;
+let ready=false, readyAt=0, stableSince=0, swingStarted=false, swingStartAt=0, addressLocked=false;
+let lastPose=null, lastPoseTime=0, lastWristSpeed=0;
+let latestLandmarks=null, cooldown=false;
+
+const STABLE_MS=850;
+const READY_BEEP_DELAY=300;
+const SWING_HAND_SPEED=0.16;
+const SWING_SHOULDER_TURN=0.015;
+const MAX_PELVIS_SPEED=0.055;
+const MAX_ANKLE_SPEED=0.05;
+const SWING_CAPTURE_MS=3200;
+
+function tone(freq=880,d=.14){
+  try{
+    const a=new(window.AudioContext||window.webkitAudioContext)();
+    const o=a.createOscillator(),g=a.createGain();
+    o.connect(g);g.connect(a.destination);o.frequency.value=freq;g.gain.value=.13;
+    o.start();o.stop(a.currentTime+d);
+  }catch(e){}
+}
+
+function dist(a,b){
+  const dx=a.x-b.x,dy=a.y-b.y;
+  return Math.hypot(dx,dy);
+}
+
+function personVisible(lm){
+  if(!lm || lm.length<25) return false;
+  // 사람 존재 표시는 상체+골반만으로도 인정한다.
+  // 실제 ADDRESS LOCK/스윙 판정은 기존 하체 조건을 그대로 사용한다.
+  const core=[11,12,13,14,15,16,23,24];
+  return core.filter(i=>(lm[i]?.visibility||0)>0.35).length>=5;
+}
+
+function poseMotionMetrics(lm, now){
+  if(!lastPose || !lastPoseTime){
+    lastPose=lm.map(p=>({x:p.x,y:p.y}));
+    lastPoseTime=now;
+    return {stability:0,handSpeed:0,shoulderTurn:0,pelvisSpeed:0,ankleSpeed:0};
+  }
+
+  const dt=Math.max(0.016,(now-lastPoseTime)/1000);
+  const ids=[11,12,13,14,15,16,23,24,25,26,27,28];
+  let sum=0,n=0;
+  for(const i of ids){
+    if(lm[i] && lastPose[i]){sum+=dist(lm[i],lastPose[i]);n++}
+  }
+  const stability=n?sum/n:0;
+
+  const pelvis={x:(lm[23].x+lm[24].x)/2,y:(lm[23].y+lm[24].y)/2};
+  const prevPelvis={x:(lastPose[23].x+lastPose[24].x)/2,y:(lastPose[23].y+lastPose[24].y)/2};
+  const pelvisSpeed=dist(pelvis,prevPelvis)/dt;
+
+  const ankles={x:(lm[27].x+lm[28].x)/2,y:(lm[27].y+lm[28].y)/2};
+  const prevAnkles={x:(lastPose[27].x+lastPose[28].x)/2,y:(lastPose[27].y+lastPose[28].y)/2};
+  const ankleSpeed=dist(ankles,prevAnkles)/dt;
+
+  // 양손의 중간점을 골반 기준으로 계산.
+  // 걷기 때는 양팔이 반대로 흔들려 중간점 이동이 상대적으로 작고,
+  // 골프 스윙 때는 두 손이 함께 크게 움직인다.
+  const hands={x:(lm[15].x+lm[16].x)/2,y:(lm[15].y+lm[16].y)/2};
+  const prevHands={x:(lastPose[15].x+lastPose[16].x)/2,y:(lastPose[15].y+lastPose[16].y)/2};
+  const relHands={x:hands.x-pelvis.x,y:hands.y-pelvis.y};
+  const prevRelHands={x:prevHands.x-prevPelvis.x,y:prevHands.y-prevPelvis.y};
+  const handSpeed=dist(relHands,prevRelHands)/dt;
+
+  const shoulderNow=Math.atan2(lm[12].y-lm[11].y,lm[12].x-lm[11].x);
+  const shoulderPrev=Math.atan2(lastPose[12].y-lastPose[11].y,lastPose[12].x-lastPose[11].x);
+  let shoulderTurn=Math.abs(shoulderNow-shoulderPrev);
+  if(shoulderTurn>Math.PI) shoulderTurn=2*Math.PI-shoulderTurn;
+
+  lastPose=lm.map(p=>({x:p.x,y:p.y}));
+  lastPoseTime=now;
+  return {stability,handSpeed,shoulderTurn,pelvisSpeed,ankleSpeed};
+}
+
+function addressSimilarity(lm){
+  if(!lm) return {ok:false,score:0};
+  const needed=[11,12,15,16,23,24,25,26,27,28];
+  if(needed.some(i=>!lm[i] || (lm[i].visibility!=null && lm[i].visibility<0.20))) return {ok:false,score:0};
+
+  const ls=lm[11], rs=lm[12], lh=lm[23], rh=lm[24];
+  const lk=lm[25], rk=lm[26], la=lm[27], ra=lm[28];
+  const lw=lm[15], rw=lm[16];
+
+  const shoulderMid={x:(ls.x+rs.x)/2,y:(ls.y+rs.y)/2};
+  const hipMid={x:(lh.x+rh.x)/2,y:(lh.y+rh.y)/2};
+  const kneeMid={x:(lk.x+rk.x)/2,y:(lk.y+rk.y)/2};
+  const ankleMid={x:(la.x+ra.x)/2,y:(la.y+ra.y)/2};
+  const handMid={x:(lw.x+rw.x)/2,y:(lw.y+rw.y)/2};
+
+  const torsoLen=Math.max(0.001,dist(shoulderMid,hipMid));
+  const feetGap=Math.abs(la.x-ra.x);
+  const kneeGap=Math.abs(lk.x-rk.x);
+  const handGap=dist(lw,rw);
+  const handBelowShoulders=(handMid.y-shoulderMid.y)/torsoLen;
+  const handFromHips=Math.abs(handMid.y-hipMid.y)/torsoLen;
+  const hipToKnee=Math.max(0.001,dist(hipMid,kneeMid));
+  const kneeToAnkle=Math.max(0.001,dist(kneeMid,ankleMid));
+  const bodyCentered=hipMid.x>0.18 && hipMid.x<0.82;
+
+  // V11.1B: 스윙 감지 로직은 V11.1 그대로 유지.
+  // 어드레스 판정에만 '명확한 짝다리' 제외 조건을 추가한다.
+  //
+  // 짝다리 판정은 한 가지 값으로 단정하지 않고,
+  // 좌우 골반 높이 + 좌우 무릎 높이 + 양발 높이 차이를 함께 본다.
+  // 정상적인 골프 어드레스의 약간의 비대칭은 허용한다.
+  const hipLevelDiff=Math.abs(lh.y-rh.y);
+  const kneeLevelDiff=Math.abs(lk.y-rk.y);
+  const ankleLevelDiff=Math.abs(la.y-ra.y);
+
+  // 한쪽 다리에 체중을 크게 싣고 서 있을 때 흔히 나타나는
+  // 과도한 좌우 하체 비대칭만 제외.
+  const obviousOneLeg =
+    (hipLevelDiff>0.085 && kneeLevelDiff>0.095) ||
+    (kneeLevelDiff>0.13) ||
+    (ankleLevelDiff>0.12 && hipLevelDiff>0.065);
+
+  let score=0;
+  if(bodyCentered) score++;
+  if(feetGap>=0.055 && feetGap<=0.38) score++;
+  if(kneeGap>=0.04 && kneeGap<=0.34) score++;
+  if(handGap<=0.24) score++;
+  if(handBelowShoulders>=0.45 && handBelowShoulders<=2.50) score++;
+  if(handFromHips<=1.55) score++;
+  if(hipToKnee>=0.13 && kneeToAnkle>=0.13) score++;
+
+  // 기존 V11.1 계열처럼 7개 중 5개 이상이면 어드레스 후보.
+  // 단, 명확한 짝다리로 판단되면 ADDRESS로 인정하지 않는다.
+  return {ok:(score>=5 && !obviousOneLeg),score,obviousOneLeg};
+}
+
+
+function drawSkeleton(lm){
+  if(!lm) return;
+  const pairs=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
+  ctx.lineWidth=3; ctx.strokeStyle='rgba(255,255,255,.9)';
+  for(const [a,b] of pairs){
+    const p=lm[a],q=lm[b];
+    if(!p||!q||p.visibility<.35||q.visibility<.35) continue;
+    ctx.beginPath();ctx.moveTo(p.x*view.width,p.y*view.height);ctx.lineTo(q.x*view.width,q.y*view.height);ctx.stroke();
+  }
+  ctx.fillStyle='white';
+  for(const i of [11,12,13,14,15,16,23,24,25,26,27,28]){
+    const p=lm[i]; if(!p||p.visibility<.35) continue;
+    ctx.beginPath();ctx.arc(p.x*view.width,p.y*view.height,5,0,Math.PI*2);ctx.fill();
+  }
+}
+
+function startRecording(){
+  if(recording || !stream) return;
+  chunks=[];
+  let opt={};
+  if(MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) opt={mimeType:'video/webm;codecs=vp8'};
+  else if(MediaRecorder.isTypeSupported('video/webm')) opt={mimeType:'video/webm'};
+  recorder=new MediaRecorder(stream,opt);
+  recorder.ondataavailable=e=>{if(e.data.size) chunks.push(e.data)};
+  recorder.onstop=()=>{
+    recording=false;
+    if(!chunks.length) return;
+    const blob=new Blob(chunks,{type:recorder.mimeType||'video/webm'});
+    latestReplayBlob=blob;
+    if(replay.src) URL.revokeObjectURL(replay.src);
+    replay.src=URL.createObjectURL(blob);
+    replay.loop=true; replay.muted=true; replay.load();
+    replay.onloadedmetadata=()=>{
+      $('replayPlay').disabled=false;$('replayPause').disabled=false;
+      $('sendA').disabled=false;$('sendB').disabled=false;$('frontJointBtn').disabled=false;
+      $('frameBack').disabled=false;$('frameNext').disabled=false;
+      $('speedMenuBtn').disabled=false;$('frontRotateBtn').disabled=false;
+      $('replaySeek').disabled=false;
+      replay.playbackRate=1;
+      $('speedMenuBtn').textContent='속도 1.0× ▾';
+      document.querySelectorAll('.speedChoice').forEach(b=>{
+        b.className='speedChoice '+(Number(b.dataset.speed)===1?'green':'white');
+      });
+      $('timeTotal').textContent=replay.duration.toFixed(2);
+      replay.currentTime=0;replay.play().catch(()=>{});if(typeof window.svShowReplay==='function')window.svShowReplay();
+      $('result').textContent='최근 정상 스윙 · 다음 정상 스윙 전까지 반복 유지';
+    };
+  };
+  recorder.start(100);
+  recording=true;
+  // V12.1: 정면 관절감지 트리거와 같은 순간에 측면도 녹화
+  if(typeof window.startSideRecording==='function'){
+    try{ window.startSideRecording(); }catch(e){ console.warn('side record start',e); }
+  }
+}
+
+function stopRecordingSoon(){
+  setTimeout(()=>{if(recorder&&recorder.state==='recording') recorder.stop()},SWING_CAPTURE_MS);
+}
+
+async function onResults(results){
+  processing=false;
+  lastPoseRenderAt=performance.now();
+  latestLandmarks=results.poseLandmarks||null;
+  const now=performance.now();
+
+  const r=view.getBoundingClientRect();
+  if(view.width!==Math.round(r.width)||view.height!==Math.round(r.height)){
+    view.width=Math.round(r.width);view.height=Math.round(r.height);
+  }
+
+  ctx.clearRect(0,0,view.width,view.height);
+  sizeRawPreview();
+
+  const present=personVisible(latestLandmarks);
+  $('presence').textContent=present?'사람 있음':'사람 없음';
+
+  if(!present){
+    ready=false;addressLocked=false;stableSince=0;swingStarted=false;lastPose=null;lastPoseTime=0;
+    $('stable').textContent='0.00';$('wristSpeed').textContent='0.00';
+    $('addressState').textContent='OFF';$('swingState').textContent='대기';
+    $('state').className='state wait';$('state').textContent='사람 없음 · 대기';
+    $('status').textContent='최근 정상 스윙 리플레이는 그대로 유지됩니다.';
+    return;
+  }
+
+  // MediaPipe 입력 자체를 90° 정상화했으므로 관절좌표를 그대로 사용한다.
+  const rotated=latestLandmarks;
+  drawSkeleton(rotated);
+
+  const m=poseMotionMetrics(rotated,now);
+  $('stable').textContent=m.stability.toFixed(3);
+  $('wristSpeed').textContent=m.handSpeed.toFixed(2);
+
+  if(!armed || cooldown) return;
+
+  const addressCheck=addressSimilarity(rotated);
+  const isAddress=addressCheck.ok;
+
+  if(!ready && !swingStarted){
+    // ADDRESS LOCK is mandatory. Without it, every movement is treated as normal movement.
+    const stableAddress =
+      isAddress &&
+      m.stability<0.020 &&
+      m.pelvisSpeed<MAX_PELVIS_SPEED &&
+      m.ankleSpeed<MAX_ANKLE_SPEED;
+
+    if(stableAddress){
+      if(!stableSince) stableSince=now;
+      const held=now-stableSince;
+      $('addressState').textContent='CHECK '+addressCheck.score+'/7';
+      $('state').className='state wait';
+      $('state').textContent='어드레스 유사범위 확인 '+Math.min(STABLE_MS,held).toFixed(0)+' / '+STABLE_MS+' ms';
+
+      if(held>=STABLE_MS){
+        addressLocked=true;
+        ready=true;readyAt=now;stableSince=0;
+        $('addressState').textContent='LOCK';
+        $('overlay').style.display='flex';
+        $('state').className='state ready';$('state').textContent='READY';
+        $('status').textContent='ADDRESS LOCK 완료 · 0.3초 후 삑 소리가 나면 바로 스윙하세요.';
+
+        setTimeout(()=>{
+          if(ready && addressLocked){
+            tone(980,.12);
+            $('state').textContent='READY · 삑 — 지금 스윙';
+            $('status').textContent='ADDRESS LOCK 이후의 관절 움직임만 스윙 후보로 판단합니다.';
+          }
+        },READY_BEEP_DELAY);
+
+        setTimeout(()=>$('overlay').style.display='none',900);
+      }
+    }else{
+      stableSince=0;
+      addressLocked=false;
+      $('addressState').textContent=isAddress?'유사 '+addressCheck.score+'/7':'OFF';
+      $('state').className='state wait';
+      if(addressCheck.obviousOneLeg){
+        $('state').textContent='짝다리/하체 비대칭 · 일반동작';
+        $('status').textContent='명확한 짝다리 자세는 ADDRESS로 인정하지 않습니다.';
+      }else{
+        $('state').textContent=isAddress?'어드레스 유사 · 안정 대기':'일반동작 · 어드레스 대기';
+        $('status').textContent='ADDRESS LOCK 전에는 어떤 움직임도 스윙으로 판단하지 않습니다.';
+      }
+    }
+    return;
+  }
+
+  if(ready && addressLocked && !swingStarted){
+    if(now-readyAt<READY_BEEP_DELAY) return;
+
+    // 걷기 배제 핵심:
+    // 1) 골반이 이동하지 않아야 함
+    // 2) 발목 중심이 이동하지 않아야 함
+    // 3) 양손이 골반에 대해 함께 빠르게 움직여야 함
+    // 4) 어깨 회전이 같이 나와야 함
+    const feetPlanted =
+      m.pelvisSpeed<MAX_PELVIS_SPEED &&
+      m.ankleSpeed<MAX_ANKLE_SPEED;
+
+    const golfPattern =
+      m.handSpeed>=SWING_HAND_SPEED &&
+      m.shoulderTurn>=SWING_SHOULDER_TURN;
+
+    if(feetPlanted && golfPattern){
+      swingStarted=true;ready=false;swingStartAt=now;
+      $('swingState').textContent='스윙';
+      $('state').className='state impact';$('state').textContent='SWING 감지';
+      $('status').textContent='골프 스윙 패턴 확인 · 영상 저장 중';
+
+      startRecording();
+      stopRecordingSoon();
+      cooldown=true;
+
+      setTimeout(()=>{
+        swingStarted=false;addressLocked=false;ready=false;lastPose=null;lastPoseTime=0;cooldown=false;
+        $('addressState').textContent='OFF';$('swingState').textContent='대기';
+        $('state').className='state wait';$('state').textContent='다음 스윙 대기';
+        $('status').textContent='최근 스윙 반복재생 유지 · 다음 어드레스를 기다립니다.';
+      },SWING_CAPTURE_MS+1000);
+    }
+  }
+}
+
+
+let lastPoseRenderAt=0;
+function drawRawPreviewFrame(){ sizeRawPreview(); }
+function livePreviewLoop(){
+  // Pose 결과가 정상적으로 들어오면 onResults가 영상+관절을 그린다.
+  // Pose 로딩/처리가 지연될 때는 이 루프가 카메라 영상을 계속 보여준다.
+  if(stream && raw.readyState>=2 && (performance.now()-lastPoseRenderAt)>120){
+    drawRawPreviewFrame();
+  }
+  requestAnimationFrame(livePreviewLoop);
+}
+livePreviewLoop();
+
+async function poseLoop(){
+  if(!stream) return;
+  if(!processing && raw.readyState>=2 && raw.videoWidth && raw.videoHeight){
+    processing=true;
+    try{
+      // 카메라 센서 원본은 90° 돌아가 있으므로,
+      // MediaPipe에는 바로 세운 프레임을 전달한다.
+      poseInput.width=raw.videoHeight;
+      poseInput.height=raw.videoWidth;
+      poseInputCtx.setTransform(1,0,0,1,0,0);
+      poseInputCtx.clearRect(0,0,poseInput.width,poseInput.height);
+      poseInputCtx.translate(poseInput.width/2,poseInput.height/2);
+      poseInputCtx.rotate(Math.PI/2);
+      poseInputCtx.drawImage(raw,-raw.videoWidth/2,-raw.videoHeight/2);
+      poseInputCtx.setTransform(1,0,0,1,0,0);
+      await pose.send({image:poseInput});
+    }catch(e){
+      processing=false;
+      if($('status')) $('status').textContent='카메라 영상 연결됨 · 관절모델 준비/처리 중';
+    }
+  }
+  raf=requestAnimationFrame(poseLoop);
+}
+
+function replayLoop(){
+  if(replay.videoWidth){
+    const r=replayCanvas.getBoundingClientRect();
+    const cw=Math.max(1,Math.round(r.width)),ch=Math.max(1,Math.round(r.height));
+    if(replayCanvas.width!==cw||replayCanvas.height!==ch){
+      replayCanvas.width=cw;replayCanvas.height=ch;
+    }
+    rctx.clearRect(0,0,cw,ch);
+
+    const deg=(window.svFrontRotation??90)%360;
+    const rotated=(deg===90||deg===270);
+    const sw=replay.videoWidth, sh=replay.videoHeight;
+    const outW=rotated?sh:sw, outH=rotated?sw:sh;
+
+    // 원본 종횡비 유지 + 영상 전체 표시 + 크롭/늘어남 금지
+    const scale=Math.min(cw/outW,ch/outH);
+
+    rctx.save();
+    rctx.translate(cw/2,ch/2);
+    rctx.rotate(deg*Math.PI/180);
+    rctx.drawImage(replay,-sw*scale/2,-sh*scale/2,sw*scale,sh*scale);
+    rctx.restore();
+  }
+  requestAnimationFrame(replayLoop);
+}
+replayLoop();
+
+
+
+function sizeRawPreview(){
+  const stage=$('liveStage');
+  if(!stage || !raw || !raw.videoWidth || !raw.videoHeight) return;
+  const w=Math.max(1,stage.clientWidth), h=Math.max(1,stage.clientHeight);
+  // Because camera is physically mounted 90 degrees, swap stage dimensions.
+  raw.style.width=h+'px';
+  raw.style.height=w+'px';
+}
+window.addEventListener('resize',()=>setTimeout(sizeRawPreview,30));
+
+async function refreshCameraList(){
+  const sel=$('cameraSelect');
+  if(!sel || !navigator.mediaDevices?.enumerateDevices) return;
+  try{
+    const prev=sel.value;
+    const devices=await navigator.mediaDevices.enumerateDevices();
+    const cams=devices.filter(d=>d.kind==='videoinput');
+    sel.innerHTML='<option value="">기본 카메라</option>';
+    cams.forEach((d,i)=>{
+      const o=document.createElement('option');
+      o.value=d.deviceId; o.textContent=d.label||('카메라 '+(i+1)); sel.appendChild(o);
+    });
+    if([...sel.options].some(o=>o.value===prev)) sel.value=prev;
+  }catch(e){}
+}
+if(navigator.mediaDevices?.addEventListener) navigator.mediaDevices.addEventListener('devicechange',refreshCameraList);
+refreshCameraList();
+
+$('connect').onclick=async()=>{
+  try{
+    const selectedCamera=$('cameraSelect')?.value||'';
+    if(!window.isSecureContext || !navigator.mediaDevices?.getUserMedia){
+      $('status').textContent='카메라 연결 불가: 현재 파일 주소(content:// 또는 file://)에서는 브라우저가 카메라를 차단할 수 있습니다. SV MOBILE을 HTTPS 웹주소로 열어주세요.';
+      return;
+    }
+    const videoConstraints=selectedCamera
+      ? {deviceId:{exact:selectedCamera},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}}
+      : {facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}};
+    $('status').textContent='카메라 권한을 요청하는 중입니다. 브라우저 권한 창에서 허용을 눌러주세요.';
+    try{
+      stream=await navigator.mediaDevices.getUserMedia({video:videoConstraints,audio:false});
+    }catch(firstError){
+      // Retry only if device constraints are unsupported; never bypass permission denial.
+      if(['OverconstrainedError','NotFoundError'].includes(firstError.name)){
+        stream=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
+      }else{throw firstError;}
+    }
+    raw.srcObject=stream;
+    raw.style.display='block';
+    await raw.play();
+    sizeRawPreview();
+    if(typeof window.fitLiveStageInsideViewport==='function') setTimeout(window.fitLiveStageInsideViewport,60);
+    await refreshCameraList();
+    raw.addEventListener('loadedmetadata',sizeRawPreview,{once:true});
+    raw.addEventListener('canplay',sizeRawPreview,{once:true});
+    drawRawPreviewFrame();
+
+    pose=new Pose({locateFile:file=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`});
+    pose.setOptions({
+      modelComplexity:1,
+      smoothLandmarks:true,
+      enableSegmentation:false,
+      minDetectionConfidence:0.45,
+      minTrackingConfidence:0.45
+    });
+    pose.onResults(onResults);
+
+    $('connect').disabled=true;$('arm').disabled=false;$('disconnect').disabled=false;
+    $('status').textContent='카메라 영상 연결됨 · 90° 정상화 관절감지 준비 완료';
+    poseLoop();
+  }catch(e){
+    const reason=e?.name||'UnknownError';
+    const guidance=reason==='NotAllowedError'||reason==='PermissionDeniedError'
+      ? '카메라 권한이 거부되었습니다. Chrome 주소창 왼쪽 사이트 설정에서 카메라 허용을 확인하세요. content:// 파일이면 HTTPS 주소로 실행해야 합니다.'
+      : reason==='NotReadableError'?'다른 앱이 카메라를 사용 중일 수 있습니다. 카메라 앱을 종료하고 다시 연결하세요.'
+      : reason==='NotFoundError'?'사용 가능한 카메라를 찾지 못했습니다.'
+      : reason==='OverconstrainedError'?'선택한 카메라의 영상 설정을 지원하지 않습니다. 기본 카메라로 다시 시도하세요.'
+      : '브라우저 카메라 권한과 HTTPS 연결 상태를 확인하세요.';
+    $('status').textContent='연결 실패: '+reason+' — '+guidance;
+  }
+};
+
+$('arm').onclick=()=>{
+  armed=!armed;ready=false;addressLocked=false;stableSince=0;swingStarted=false;lastPose=null;lastPoseTime=0;
+  $('arm').textContent=armed?'관절감지 정지':'관절감지 시작';
+  $('state').className='state wait';
+  $('addressState').textContent='OFF';$('state').textContent=armed?'사람/어드레스 대기':'대기';
+  $('status').textContent=armed?'타석에 서서 어드레스를 잡으세요.':'관절감지 OFF';
+};
+
+
+function sendReplayToTUp(slot){
+  if(!latestReplayBlob){$('result').textContent='보낼 최근 스윙 영상이 없습니다.';return;}
+  const target=(window.opener&&!window.opener.closed)?window.opener:null;
+  if(!target){$('result').textContent='티업 회원카드에서 SV 촬영을 열어야 전송됩니다.';return;}
+  try{
+    target.postMessage({type:'TUP_SV_VIDEO',slot:slot,blob:latestReplayBlob,rotation:90,createdAt:Date.now()},'*');
+    $('result').textContent='✓ '+slot+'화면 전송 완료';
+  }catch(e){$('result').textContent='전송 실패: '+e.message;}
+}
+if($('sendA'))$('sendA').onclick=()=>sendReplayToTUp('A');
+if($('sendB'))$('sendB').onclick=()=>sendReplayToTUp('B');
+
+$('replayPlay').onclick=()=>replay.play().catch(()=>{});
+$('replayPause').onclick=()=>replay.pause();
+
+const REPLAY_FPS=30;
+
+$('frameBack').onclick=()=>{
+  replay.pause();
+  replay.currentTime=Math.max(0,replay.currentTime-(1/REPLAY_FPS));
+};
+$('frameNext').onclick=()=>{
+  replay.pause();
+  replay.currentTime=Math.min(replay.duration||0,replay.currentTime+(1/REPLAY_FPS));
+};
+
+$('speedMenuBtn').onclick=(e)=>{
+  e.stopPropagation();
+  const menu=$('speedMenu');
+  menu.style.display=menu.style.display==='none'?'flex':'none';
+  menu.style.flexDirection='column';
+  menu.style.gap='4px';
+};
+
+document.querySelectorAll('.speedChoice').forEach(btn=>{
+  btn.onclick=(e)=>{
+    e.stopPropagation();
+    const speed=Number(btn.dataset.speed);
+    replay.playbackRate=speed;
+    $('speedMenuBtn').textContent='속도 '+speed.toFixed(speed%1?2:1)+'× ▾';
+    document.querySelectorAll('.speedChoice').forEach(b=>{
+      b.className='speedChoice '+(b===btn?'green':'white');
+    });
+    $('speedMenu').style.display='none';
+  };
+});
+
+document.addEventListener('click',()=>{
+  const menu=$('speedMenu');
+  if(menu) menu.style.display='none';
+});
+$('replaySeek').oninput=e=>{
+  if(!isFinite(replay.duration)||!replay.duration)return;
+  replay.currentTime=(Number(e.target.value)/1000)*replay.duration;
+};
+replay.addEventListener('timeupdate',()=>{
+  $('timeNow').textContent=(replay.currentTime||0).toFixed(2);
+  if(isFinite(replay.duration)&&replay.duration>0){
+    $('replaySeek').value=Math.round((replay.currentTime/replay.duration)*1000);
+    $('timeTotal').textContent=replay.duration.toFixed(2);
+  }
+});
+
+$('disconnect').onclick=()=>{
+  armed=false;
+  if(raf) cancelAnimationFrame(raf);
+  if(stream) stream.getTracks().forEach(t=>t.stop());
+  if(recorder&&recorder.state==='recording') recorder.stop();
+  stream=null;raw.srcObject=null;
+  $('connect').disabled=false;$('arm').disabled=true;$('disconnect').disabled=true;
+  $('status').textContent='해제됨';
+};
+</script>
+
+<script id="svV121DualReplayScript">
+(function(){
+  'use strict';
+  const byId=id=>document.getElementById(id);
+  function svShowLive(){
+    const wrap=document.querySelector('.wrap');if(!wrap)return;
+    wrap.classList.add('live-first-mode');wrap.classList.remove('replay-mode');
+    setTimeout(()=>{ if(typeof window.fitLiveStageInsideViewport==='function') window.fitLiveStageInsideViewport(); },30);
+  }
+  function svShowReplay(){
+    const wrap=document.querySelector('.wrap');if(!wrap)return;
+    wrap.classList.remove('live-first-mode');wrap.classList.add('replay-mode');
+    if(typeof applyCameraLayout==='function')applyCameraLayout();
+  }
+
+  window.svShowLive=svShowLive;window.svShowReplay=svShowReplay;
+
+  function fitLiveStageInsideViewport(){
+    const wrap=document.querySelector('.wrap');
+    const panel=byId('svLivePanel');
+    const stage=byId('liveStage');
+    if(!wrap||!panel||!stage||!wrap.classList.contains('live-first-mode')) return;
+
+    const controls=panel.querySelector(':scope > .controls');
+    const stats=panel.querySelector('.stats');
+    const state=panel.querySelector('.state');
+    const status=panel.querySelector('.status');
+
+    const viewportH=window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight;
+    const cs=getComputedStyle(panel);
+    const padTop=parseFloat(cs.paddingTop)||0;
+    const padBottom=parseFloat(cs.paddingBottom)||0;
+
+    function outerH(el){
+      if(!el || getComputedStyle(el).display==='none') return 0;
+      const r=el.getBoundingClientRect();
+      const st=getComputedStyle(el);
+      return r.height + (parseFloat(st.marginTop)||0) + (parseFloat(st.marginBottom)||0);
+    }
+
+    const used =
+      padTop + padBottom +
+      outerH(controls) +
+      outerH(stats) +
+      outerH(state) +
+      outerH(status) +
+      10; // 안전 여유
+
+    const available=Math.max(180,Math.floor(viewportH-used));
+    stage.style.setProperty('height',available+'px','important');
+    stage.style.setProperty('max-height',available+'px','important');
+
+    // 기존 LIVE 원본 사이징 함수 재사용
+    if(typeof sizeRawPreview==='function') setTimeout(sizeRawPreview,0);
+  }
+
+  window.fitLiveStageInsideViewport=fitLiveStageInsideViewport;
+  window.addEventListener('resize',()=>setTimeout(fitLiveStageInsideViewport,30));
+  if(window.visualViewport){
+    window.visualViewport.addEventListener('resize',()=>setTimeout(fitLiveStageInsideViewport,30));
+  }
+
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',svShowLive,{once:true});
+  else svShowLive();
+  const frontPanel=byId('svReplayPanel');
+  const livePanel=byId('svLivePanel');
+  if(!frontPanel||!livePanel) return;
+
+  /* ---------- 정면 패널 정리 ---------- */
+  const frontSub=frontPanel.querySelector('.sub');
+  if(frontSub){
+    frontSub.className='dualTitle';
+    frontSub.innerHTML='<span>REPLAY · 정면</span><span class="camBadge">CAM 1 · 관절감지 기준</span>';
+  }
+  const frontStage=byId('mainVideoStage');
+  if(frontStage){
+    frontStage.classList.add('dualStage');
+    frontStage.style.height='';
+    const jc=document.createElement('canvas');
+    jc.id='frontJointCanvas';
+    frontStage.appendChild(jc);
+  }
+  const frontSeek=byId('replaySeek')?.parentElement;
+  if(frontSeek) frontSeek.classList.add('seekRow');
+
+  /* ---------- 측면 패널 생성 ---------- */
+  const side=document.createElement('div');
+  side.className='panel';
+  side.id='svSideReplayPanel';
+  side.innerHTML=`
+    <div class="dualTitle"><span>REPLAY · 측면</span><span class="camBadge">CAM 2 · 동기촬영</span></div>
+    <div class="dualStage" id="sideVideoStage">
+      <canvas id="sideReplayCanvas"></canvas>
+      <canvas id="sideJointCanvas"></canvas>
+    </div>
+    <video id="sideReplay" playsinline loop muted></video>
+    <div class="controls">
+      <button id="sidePlay" class="white" disabled>재생</button>
+      <button id="sidePause" class="dark" disabled>정지</button>
+      <button id="sideSendA" class="green" disabled>A화면 보내기</button>
+      <button id="sideSendB" class="green" disabled>B화면 보내기</button>
+      <button id="sideJointBtn" class="dark" disabled>관절보기 OFF</button>
+      <button id="sideFrameBack" class="white" disabled>◀1F</button>
+      <button id="sideFrameNext" class="white" disabled>1F▶</button>
+      <select id="sideSpeed" class="white" disabled>
+        <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
+        <option value="0.75">0.75×</option><option value="1" selected>1.0×</option>
+        <option value="1.5">1.5×</option><option value="2">2.0×</option>
+      </select>
+      <button id="sideRotateBtn" class="white" disabled>영상회전 90°</button>
+    </div>
+    <div class="seekRow">
+      <span id="sideTimeNow" class="status" style="min-width:42px">0.00</span>
+      <input id="sideSeek" type="range" min="0" max="1000" value="0" disabled style="flex:1">
+      <span id="sideTimeTotal" class="status" style="min-width:42px;text-align:right">0.00</span>
+    </div>
+    <div id="sideResult" class="status">측면 카메라 연결 대기</div>`;
+  frontPanel.insertAdjacentElement('afterend',side);
+
+  byId('liveViewBtn')?.addEventListener('click',()=>{
+    svShowLive();
+    const st=byId('status');
+    if(st && stream) st.textContent='LIVE · 다음 스윙 감지 대기';
+  });
+
+  byId('exitBtn')?.addEventListener('click',()=>{
+    try{
+      if(recorder && recorder.state==='recording') recorder.stop();
+    }catch(e){}
+    try{
+      if(sideRecorder && sideRecorder.state==='recording') sideRecorder.stop();
+    }catch(e){}
+    try{
+      if(stream) stream.getTracks().forEach(t=>t.stop());
+    }catch(e){}
+    try{
+      if(sideStream) sideStream.getTracks().forEach(t=>t.stop());
+    }catch(e){}
+
+    stream=null;
+    sideStream=null;
+    try{ raw.srcObject=null; }catch(e){}
+
+    // 회원카드에서 팝업으로 연 경우 정상적으로 닫힘
+    if(window.opener && !window.opener.closed){
+      window.close();
+      return;
+    }
+
+    // 일반 브라우저 탭은 보안상 window.close()가 차단될 수 있음
+    document.body.innerHTML =
+      '<div style="height:100vh;display:flex;align-items:center;justify-content:center;background:#07140f;color:#fff;font-family:Arial,sans-serif">' +
+      '<div style="text-align:center"><div style="font-size:28px;font-weight:900;margin-bottom:10px">SV 종료</div>' +
+      '<div style="font-size:15px;color:#bdd0c6">카메라 연결을 종료했습니다. 이 탭을 닫아도 됩니다.</div></div></div>';
+  });
+
+
+  /* ---------- 카메라 선택 바: 정면 + 측면 ---------- */
+  const controls=livePanel.querySelector('.controls');
+  if(controls && !byId('sideCameraSelect')){
+    const frontTag=document.createElement('span');
+    frontTag.className='camTag';
+    frontTag.textContent='정면';
+    controls.insertBefore(frontTag,controls.firstChild);
+
+    const sideTag=document.createElement('span');
+    sideTag.className='camTag';
+    sideTag.id='sideCamUiTag';
+    sideTag.textContent='측면';
+
+    const sideSelect=document.createElement('select');
+    sideSelect.id='sideCameraSelect';
+    sideSelect.className='white';
+    sideSelect.title='측면 카메라 선택';
+    sideSelect.innerHTML='<option value="">측면 카메라 선택</option>';
+
+    const connect=byId('connect');
+    controls.insertBefore(sideTag,connect);
+    controls.insertBefore(sideSelect,connect);
+  }
+
+  let sideStream=null;
+  let sideRecorder=null;
+
+  function applyCameraLayout(){
+    const wrap=document.querySelector('.wrap');
+    if(!wrap) return;
+    wrap.classList.toggle('dual-camera-active',!!sideStream);
+  }
+  window.addEventListener('resize',applyCameraLayout);
+
+  let sideChunks=[];
+  let latestSideBlob=null;
+
+  const sideReplay=byId('sideReplay');
+  const sideCanvas=byId('sideReplayCanvas');
+  const sideCtx=sideCanvas.getContext('2d');
+  const frontJointCanvas=byId('frontJointCanvas');
+  const sideJointCanvas=byId('sideJointCanvas');
+
+  let frontJointOn=false, sideJointOn=false;
+  let frontReplayPose=null, sideReplayPose=null;
+  let frontPoseBusy=false, sidePoseBusy=false;
+  let frontLastPoseAt=0, sideLastPoseAt=0;
+
+  async function refreshSideCameraList(){
+    try{
+      const devices=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');
+      const sel=byId('sideCameraSelect');
+      const wrap=document.querySelector('.wrap');
+      if(!sel||!wrap) return;
+
+      const old=sel.value;
+      const frontId=byId('cameraSelect')?.value||'';
+
+      sel.innerHTML='<option value="">측면 카메라 선택</option>';
+      devices.forEach((d,i)=>{
+        const o=document.createElement('option');
+        o.value=d.deviceId;
+        o.textContent=d.label||('카메라 '+(i+1));
+        sel.appendChild(o);
+      });
+
+      // 실제 비디오 입력이 2개 이상 보이면 CAM2 사용 가능 상태
+      wrap.classList.toggle('side-camera-available',devices.length>=2 && !window.matchMedia('(max-width:620px)').matches);
+
+      if([...sel.options].some(o=>o.value===old)){
+        sel.value=old;
+      }else{
+        sel.value='';
+      }
+
+      // 장치가 1개뿐이면 측면 연결/패널을 자동 해제
+      if(devices.length<2){
+        if(sideStream) sideStream.getTracks().forEach(t=>t.stop());
+        sideStream=null;
+        wrap.classList.remove('dual-camera-active');
+        byId('sideResult').textContent='카메라 1대 · 정면 리플레이 전체화면';
+      }
+    }catch(e){}
+  }
+  refreshSideCameraList();
+  if(navigator.mediaDevices?.addEventListener) navigator.mediaDevices.addEventListener('devicechange',refreshSideCameraList);
+
+  async function connectSideCamera(){
+    const wrap=document.querySelector('.wrap');
+    const sel=byId('sideCameraSelect');
+    if(!wrap||!sel) return false;
+
+    // 휴대폰은 전/후면 카메라가 여러 개로 열거되는 경우가 많다.
+    // 폰에서는 자동 CAM2 연결을 하지 않고 1화면을 기본 유지한다.
+    if(window.matchMedia('(max-width:620px)').matches){
+      wrap.classList.remove('dual-camera-active');
+      byId('sideResult').textContent='모바일 · 정면 리플레이 1화면';
+      return false;
+    }
+
+    // 정면 카메라가 실제로 연결될 때까지 기다린 후 실제 deviceId를 읽는다.
+    const frontTrack=stream?.getVideoTracks?.()[0];
+    const actualFrontId=frontTrack?.getSettings?.().deviceId || byId('cameraSelect')?.value || '';
+
+    await refreshSideCameraList();
+
+    const devices=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');
+    if(devices.length<2){
+      wrap.classList.remove('dual-camera-active');
+      byId('sideResult').textContent='카메라 1대 · 정면 리플레이 전체화면';
+      return false;
+    }
+
+    // 실제 정면 장치와 다른 장치를 CAM2로 선택.
+    let id=sel.value;
+    if(!id || id===actualFrontId){
+      const candidate=devices.find(d=>d.deviceId && d.deviceId!==actualFrontId);
+      id=candidate?.deviceId||'';
+      if(id) sel.value=id;
+    }
+
+    if(!id || id===actualFrontId){
+      wrap.classList.remove('dual-camera-active');
+      byId('sideResult').textContent='별도 CAM2 없음 · 정면 리플레이 전체화면';
+      return false;
+    }
+
+    if(sideStream) sideStream.getTracks().forEach(t=>t.stop());
+
+    try{
+      sideStream=await navigator.mediaDevices.getUserMedia({
+        video:{deviceId:{exact:id},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:60}},
+        audio:false
+      });
+
+      const sideTrack=sideStream.getVideoTracks()[0];
+      const actualSideId=sideTrack?.getSettings?.().deviceId||id;
+
+      // 브라우저가 같은 장치를 다시 준 경우 2카메라로 인정하지 않는다.
+      if(actualFrontId && actualSideId===actualFrontId){
+        sideStream.getTracks().forEach(t=>t.stop());
+        sideStream=null;
+        wrap.classList.remove('dual-camera-active');
+        byId('sideResult').textContent='CAM2 미확인 · 정면 리플레이 전체화면';
+        return false;
+      }
+
+      wrap.classList.add('dual-camera-active');
+      byId('sideResult').textContent='CAM2 연결 확인 · 정면/측면 50:50 자동 전환';
+      return true;
+    }catch(e){
+      sideStream=null;
+      wrap.classList.remove('dual-camera-active');
+      byId('sideResult').textContent='CAM2 연결 안됨 · 정면 리플레이 전체화면';
+      return false;
+    }
+  }
+
+  /* 카메라 연결 1회:
+     정면 연결 완료를 확인한 뒤에만 CAM2 자동 연결을 시도 */
+  byId('connect')?.addEventListener('click',async()=>{
+    const wrap=document.querySelector('.wrap');
+    if(wrap) wrap.classList.remove('dual-camera-active');
+
+    // 최초 권한 팝업까지 고려해 최대 약 15초 동안 정면 스트림을 기다림.
+    for(let i=0;i<60;i++){
+      if(stream?.getVideoTracks?.().length && stream.getVideoTracks()[0].readyState==='live'){
+        await connectSideCamera();
+        return;
+      }
+      await new Promise(r=>setTimeout(r,250));
+    }
+
+    if(wrap) wrap.classList.remove('dual-camera-active');
+  },true);
+
+  /* ---------- 정면 트리거와 동시에 측면 녹화 ---------- */
+  window.startSideRecording=function(){
+    if(!sideStream || sideRecorder?.state==='recording') return;
+    sideChunks=[];
+    let opt={};
+    if(MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) opt={mimeType:'video/webm;codecs=vp8'};
+    else if(MediaRecorder.isTypeSupported('video/webm')) opt={mimeType:'video/webm'};
+    sideRecorder=new MediaRecorder(sideStream,opt);
+    sideRecorder.ondataavailable=e=>{ if(e.data.size) sideChunks.push(e.data); };
+    sideRecorder.onstop=()=>{
+      if(!sideChunks.length) return;
+      latestSideBlob=new Blob(sideChunks,{type:sideRecorder.mimeType||'video/webm'});
+      if(sideReplay.src) URL.revokeObjectURL(sideReplay.src);
+      sideReplay.src=URL.createObjectURL(latestSideBlob);
+      sideReplay.loop=true;
+      sideReplay.muted=true;
+      sideReplay.load();
+      sideReplay.onloadedmetadata=()=>{
+        ['sidePlay','sidePause','sideSendA','sideSendB','sideJointBtn','sideFrameBack','sideFrameNext','sideSpeed','sideRotateBtn','sideSeek']
+          .forEach(id=>byId(id).disabled=false);
+        byId('sideTimeTotal').textContent=(sideReplay.duration||0).toFixed(2);
+        sideReplay.currentTime=0;
+        sideReplay.playbackRate=1;
+        sideReplay.play().catch(()=>{});
+        byId('sideResult').textContent='최근 측면 스윙 · 정면과 동시 촬영 완료';
+      };
+    };
+    sideRecorder.start(100);
+    setTimeout(()=>{
+      if(sideRecorder && sideRecorder.state==='recording') sideRecorder.stop();
+    },3200);
+  };
+
+  /* ---------- 측면 리플레이: cover + 원본비율 유지 ---------- */
+  function drawSideReplay(){
+    if(sideReplay.videoWidth && sideReplay.readyState>=2){
+      const r=sideCanvas.getBoundingClientRect();
+      const cw=Math.max(1,Math.round(r.width)),ch=Math.max(1,Math.round(r.height));
+      if(sideCanvas.width!==cw||sideCanvas.height!==ch){
+        sideCanvas.width=cw;sideCanvas.height=ch;
+      }
+      sideCtx.clearRect(0,0,cw,ch);
+
+      const deg=(window.svSideRotation??90)%360;
+      const rotated=(deg===90||deg===270);
+      const sw=sideReplay.videoWidth, sh=sideReplay.videoHeight;
+      const outW=rotated?sh:sw, outH=rotated?sw:sh;
+
+      // 원본 종횡비 유지 + 영상 전체 표시 + 크롭/늘어남 금지
+      const scale=Math.min(cw/outW,ch/outH);
+
+      sideCtx.save();
+      sideCtx.translate(cw/2,ch/2);
+      sideCtx.rotate(deg*Math.PI/180);
+      sideCtx.drawImage(sideReplay,-sw*scale/2,-sh*scale/2,sw*scale,sh*scale);
+      sideCtx.restore();
+    }
+    requestAnimationFrame(drawSideReplay);
+  }
+  drawSideReplay();
+
+  /* ---------- 재생/프레임/배속 ---------- */
+  byId('sidePlay').onclick=()=>sideReplay.play().catch(()=>{});
+  byId('sidePause').onclick=()=>sideReplay.pause();
+  byId('sideFrameBack').onclick=()=>{sideReplay.pause();sideReplay.currentTime=Math.max(0,sideReplay.currentTime-1/30);};
+  byId('sideFrameNext').onclick=()=>{sideReplay.pause();sideReplay.currentTime=Math.min(sideReplay.duration||0,sideReplay.currentTime+1/30);};
+  byId('sideSpeed').onchange=e=>{sideReplay.playbackRate=Number(e.target.value)||1;};
+  byId('sideSeek').oninput=e=>{
+    if(isFinite(sideReplay.duration)&&sideReplay.duration>0)
+      sideReplay.currentTime=(Number(e.target.value)/1000)*sideReplay.duration;
+  };
+  sideReplay.addEventListener('timeupdate',()=>{
+    byId('sideTimeNow').textContent=(sideReplay.currentTime||0).toFixed(2);
+    if(isFinite(sideReplay.duration)&&sideReplay.duration>0){
+      byId('sideSeek').value=Math.round((sideReplay.currentTime/sideReplay.duration)*1000);
+      byId('sideTimeTotal').textContent=sideReplay.duration.toFixed(2);
+    }
+  });
+
+  /* ---------- A/B 전송: 정면/측면 모두 각각 2개 ---------- */
+  function sendSide(slot){
+    if(!latestSideBlob){byId('sideResult').textContent='보낼 측면 영상이 없습니다.';return;}
+    const target=(window.opener&&!window.opener.closed)?window.opener:null;
+    if(!target){byId('sideResult').textContent='회원카드의 SV 촬영 버튼으로 열어야 전송됩니다.';return;}
+    try{
+      target.postMessage({type:'TUP_SV_VIDEO',slot,blob:latestSideBlob,rotation:90,view:'SIDE',createdAt:Date.now()},'*');
+      byId('sideResult').textContent='✓ 측면 → '+slot+'화면 전송 완료';
+    }catch(e){byId('sideResult').textContent='전송 실패: '+e.message;}
+  }
+  byId('sideSendA').onclick=()=>sendSide('A');
+  byId('sideSendB').onclick=()=>sendSide('B');
+
+  /* ---------- 영상회전: 정면/측면 독립 ---------- */
+  window.svFrontRotation=90;
+  window.svSideRotation=90;
+
+  function clearJointCanvas(which){
+    const c=byId(which==='front'?'frontJointCanvas':'sideJointCanvas');
+    if(c){
+      const x=c.getContext('2d');
+      x.clearRect(0,0,c.width,c.height);
+    }
+  }
+
+  byId('frontRotateBtn').onclick=()=>{
+    window.svFrontRotation=(window.svFrontRotation+90)%360;
+    byId('frontRotateBtn').textContent='영상회전 '+window.svFrontRotation+'°';
+    clearJointCanvas('front');
+  };
+
+  byId('sideRotateBtn').onclick=()=>{
+    window.svSideRotation=(window.svSideRotation+90)%360;
+    byId('sideRotateBtn').textContent='영상회전 '+window.svSideRotation+'°';
+    clearJointCanvas('side');
+  };
+
+  /* ---------- 관절보기: 정면/측면 독립 ON/OFF ---------- */
+  function ensurePose(which){
+    const isFront=which==='front';
+    if(isFront && frontReplayPose) return frontReplayPose;
+    if(!isFront && sideReplayPose) return sideReplayPose;
+    const p=new Pose({locateFile:file=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`});
+    p.setOptions({
+      modelComplexity:1,smoothLandmarks:true,enableSegmentation:false,
+      minDetectionConfidence:0.45,minTrackingConfidence:0.45
+    });
+    p.onResults(res=>drawReplayJoints(which,res.poseLandmarks||null));
+    if(isFront) frontReplayPose=p; else sideReplayPose=p;
+    return p;
+  }
+
+  function drawReplayJoints(which,lm){
+    const c=which==='front'?frontJointCanvas:sideJointCanvas;
+    const stage=which==='front'?frontStage:byId('sideVideoStage');
+    if(!c||!stage) return;
+    const r=stage.getBoundingClientRect();
+    const w=Math.max(1,Math.round(r.width)), h=Math.max(1,Math.round(r.height));
+    if(c.width!==w||c.height!==h){c.width=w;c.height=h;}
+    const x=c.getContext('2d');
+    x.clearRect(0,0,w,h);
+    if(!lm) return;
+
+    // MediaPipe 입력은 아래 jointLoop에서 90° 정상화된 캔버스이므로 좌표 그대로 사용.
+    const pairs=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
+    x.lineWidth=3;x.strokeStyle='rgba(255,255,255,.95)';x.fillStyle='#fff';
+    for(const [a,b] of pairs){
+      const p=lm[a],q=lm[b]; if(!p||!q||(p.visibility||0)<.3||(q.visibility||0)<.3)continue;
+      x.beginPath();x.moveTo(p.x*w,p.y*h);x.lineTo(q.x*w,q.y*h);x.stroke();
+    }
+    for(const i of [11,12,13,14,15,16,23,24,25,26,27,28]){
+      const p=lm[i];if(!p||(p.visibility||0)<.3)continue;
+      x.beginPath();x.arc(p.x*w,p.y*h,5,0,Math.PI*2);x.fill();
+    }
+  }
+
+  const frontJointInput=document.createElement('canvas');
+  const frontJointCtx=frontJointInput.getContext('2d');
+  const sideJointInput=document.createElement('canvas');
+  const sideJointCtx=sideJointInput.getContext('2d');
+
+  async function processReplayPose(which){
+    const isFront=which==='front';
+    const video=isFront?byId('replay'):sideReplay;
+    const input=isFront?frontJointInput:sideJointInput;
+    const ictx=isFront?frontJointCtx:sideJointCtx;
+    if(!video||video.readyState<2||!video.videoWidth||!video.videoHeight) return;
+
+    const deg=(isFront?window.svFrontRotation:window.svSideRotation)??90;
+    const rotated=(deg===90||deg===270);
+
+    input.width=rotated?video.videoHeight:video.videoWidth;
+    input.height=rotated?video.videoWidth:video.videoHeight;
+
+    ictx.setTransform(1,0,0,1,0,0);
+    ictx.clearRect(0,0,input.width,input.height);
+    ictx.translate(input.width/2,input.height/2);
+    ictx.rotate(deg*Math.PI/180);
+    ictx.drawImage(video,-video.videoWidth/2,-video.videoHeight/2);
+    ictx.setTransform(1,0,0,1,0,0);
+
+    await ensurePose(which).send({image:input});
+  }
+
+  async function jointLoop(){
+    const now=performance.now();
+    if(frontJointOn && !frontPoseBusy && now-frontLastPoseAt>90){
+      frontPoseBusy=true;frontLastPoseAt=now;
+      try{await processReplayPose('front');}catch(e){}finally{frontPoseBusy=false;}
+    }
+    if(sideJointOn && !sidePoseBusy && now-sideLastPoseAt>90){
+      sidePoseBusy=true;sideLastPoseAt=now;
+      try{await processReplayPose('side');}catch(e){}finally{sidePoseBusy=false;}
+    }
+    requestAnimationFrame(jointLoop);
+  }
+  jointLoop();
+
+  function clearJoint(which){
+    const c=which==='front'?frontJointCanvas:sideJointCanvas;
+    if(c) c.getContext('2d').clearRect(0,0,c.width,c.height);
+  }
+
+  byId('frontJointBtn').onclick=()=>{
+    frontJointOn=!frontJointOn;
+    byId('frontJointBtn').textContent='관절보기 '+(frontJointOn?'ON':'OFF');
+    byId('frontJointBtn').classList.toggle('jointOn',frontJointOn);
+    if(!frontJointOn) clearJoint('front');
+  };
+  byId('sideJointBtn').onclick=()=>{
+    sideJointOn=!sideJointOn;
+    byId('sideJointBtn').textContent='관절보기 '+(sideJointOn?'ON':'OFF');
+    byId('sideJointBtn').classList.toggle('jointOn',sideJointOn);
+    if(!sideJointOn) clearJoint('side');
+  };
+
+  /* 해제 시 측면도 같이 종료 */
+  byId('disconnect')?.addEventListener('click',()=>{
+    if(sideRecorder&&sideRecorder.state==='recording') sideRecorder.stop();
+    if(sideStream) sideStream.getTracks().forEach(t=>t.stop());
+    sideStream=null;
+    document.querySelector('.wrap')?.classList.remove('dual-camera-active');
+    byId('sideResult').textContent='CAM2 해제 · 정면 리플레이 전체화면';
+  },true);
+})();
+</script>
+
+
+<!-- SV MOBILE V1: local video playback addition; original swing detector unchanged -->
+<style id="svMobileLibraryStyle">
+#svMobileLibraryBar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px;background:#112b20;border:1px solid #385a46;border-radius:8px;margin:5px 0;color:#e8f5eb;font:600 12px Arial,sans-serif}
+#svMobileLibraryBar button{background:#b8e64a;color:#132317;min-height:34px;font-size:12px}
+#svMobileLibraryBar .svFileLabel{flex:1;min-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:620px){#svMobileLibraryBar{padding:4px;gap:5px}#svMobileLibraryBar button{min-height:38px}}
+</style>
+<script id="svMobileLibraryScript">
+(()=>{
+ 'use strict';
+ const panel=document.getElementById('svReplayPanel');
+ const controls=panel?.querySelector('.controls');
+ const video=document.getElementById('replay');
+ if(!controls||!video)return;
+ const bar=document.createElement('div');bar.id='svMobileLibraryBar';
+ const button=document.createElement('button');button.type='button';button.textContent='📁 내 동영상 열기';
+ const label=document.createElement('span');label.className='svFileLabel';label.textContent='휴대폰에 저장된 영상 선택';
+ const picker=document.createElement('input');picker.type='file';picker.accept='video/*';picker.style.display='none';picker.setAttribute('aria-label','동영상 파일 선택');
+ bar.append(button,label,picker);controls.parentElement.insertBefore(bar,controls);
+ let currentURL=null;
+ button.addEventListener('click',()=>picker.click());
+ picker.addEventListener('change',async()=>{
+   const file=picker.files?.[0];if(!file)return;
+   if(!(file.type.startsWith('video/')||/\.(mp4|mov|m4v|webm|avi)$/i.test(file.name))){label.textContent='동영상 파일을 선택하세요';return;}
+   video.pause();
+   latestReplayBlob=null; // Imported videos are not newly recorded swings.
+   if(currentURL)URL.revokeObjectURL(currentURL);
+   currentURL=URL.createObjectURL(file);
+   video.removeAttribute('src');video.src=currentURL;video.loop=true;video.muted=false;video.playsInline=true;
+   // Phone videos normally have correct orientation metadata: start at zero rotation.
+   window.svFrontRotation=0;
+   const rotateBtn=document.getElementById('frontRotateBtn');if(rotateBtn)rotateBtn.disabled=false;
+   label.textContent=file.name;
+   for(const id of ['replayPlay','replayPause','frameBack','frameNext','speedMenuBtn','replaySeek','frontJointBtn']){
+     const el=document.getElementById(id);if(el)el.disabled=false;
+   }
+   video.playbackRate=1;
+   const speedBtn=document.getElementById('speedMenuBtn');if(speedBtn)speedBtn.textContent='속도 1.0× ▾';
+   const result=document.getElementById('result');if(result)result.textContent='내 동영상: '+file.name;
+   if(typeof window.svShowReplay==='function')window.svShowReplay();
+   video.load();
+   try{await video.play();}catch(e){if(result)result.textContent='영상을 선택했습니다. 재생 버튼을 눌러주세요.';}
+ });
+ window.addEventListener('pagehide',()=>{if(currentURL)URL.revokeObjectURL(currentURL)});
+})();
+</script>
+
+
+<!-- SV MOBILE V1: manual save of newly captured swing only -->
+<style id="svMobileManualSaveStyle">
+#svMobileSaveBar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px;background:#112b20;border:1px solid #385a46;border-radius:8px;margin:5px 0;color:#e8f5eb;font:600 12px Arial,sans-serif}
+#svMobileSaveBtn{background:#b8e64a;color:#132317;min-height:38px;font-size:12px;font-weight:800;border-radius:8px}
+#svMobileSaveBtn:disabled{opacity:.45}
+#svMobileSaveStatus{flex:1;min-width:120px;font-size:12px;color:#d3e6da}
+</style>
+<script id="svMobileManualSaveScript">
+(()=>{
+ 'use strict';
+ const panel=document.getElementById('svReplayPanel');
+ const controls=panel?.querySelector('.controls');
+ const replayVideo=document.getElementById('replay');
+ if(!controls||!replayVideo)return;
+ const bar=document.createElement('div');bar.id='svMobileSaveBar';
+ const saveBtn=document.createElement('button');saveBtn.type='button';saveBtn.id='svMobileSaveBtn';saveBtn.textContent='촬영 영상 저장';saveBtn.disabled=true;
+ const status=document.createElement('span');status.id='svMobileSaveStatus';status.textContent='스윙 촬영 후 저장할 수 있습니다.';
+ bar.append(saveBtn,status);
+ const libraryBar=document.getElementById('svMobileLibraryBar');
+ if(libraryBar)libraryBar.insertAdjacentElement('afterend',bar);
+ else controls.parentElement.insertBefore(bar,controls);
+ const getRecordedBlob=()=> (typeof latestReplayBlob!=='undefined' && latestReplayBlob instanceof Blob && latestReplayBlob.size>0)?latestReplayBlob:null;
+ const update=()=>{saveBtn.disabled=!getRecordedBlob();};
+ replayVideo.addEventListener('loadedmetadata',()=>{
+   update();
+   if(getRecordedBlob())status.textContent='촬영 완료 · 저장 버튼을 눌러 파일로 보관하세요.';
+   else status.textContent='내 동영상 재생 중 · 저장은 새로 촬영한 영상에만 적용됩니다.';
+ });
+ saveBtn.addEventListener('click',async()=>{
+   const blob=getRecordedBlob();if(!blob){status.textContent='저장할 촬영 영상이 없습니다.';update();return;}
+   const mime=blob.type.toLowerCase();
+   const ext=mime.includes('mp4')?'mp4':mime.includes('quicktime')?'mov':'webm';
+   const stamp=new Date();
+   const filename='TUP_SV_'+stamp.getFullYear()+String(stamp.getMonth()+1).padStart(2,'0')+String(stamp.getDate()).padStart(2,'0')+'_'+String(stamp.getHours()).padStart(2,'0')+String(stamp.getMinutes()).padStart(2,'0')+String(stamp.getSeconds()).padStart(2,'0')+'.'+ext;
+   try{
+     if(navigator.canShare && navigator.share){
+       const file=new File([blob],filename,{type:blob.type||'application/octet-stream'});
+       if(navigator.canShare({files:[file]})){
+         try{await navigator.share({files:[file],title:'SV 스윙 영상'});status.textContent='공유/파일 저장 메뉴를 실행했습니다. 저장 위치를 확인하세요.';return;}
+         catch(err){if(err.name==='AbortError'){status.textContent='저장이 취소되었습니다.';return;}}
+       }
+     }
+     const url=URL.createObjectURL(blob);
+     const a=document.createElement('a');a.href=url;a.download=filename;a.style.display='none';document.body.appendChild(a);a.click();a.remove();
+     status.textContent='다운로드를 요청했습니다. 휴대폰의 파일/다운로드 폴더를 확인하세요.';
+     setTimeout(()=>URL.revokeObjectURL(url),60000);
+   }catch(err){status.textContent='저장 요청 실패: '+(err?.message||String(err));}
+ });
+ update();
+})();
+</script>
+<style>
+#svDrawBar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0;padding:8px;background:#11291f;border:1px solid #315745;border-radius:8px}
+#svDrawBar button{padding:8px 10px;min-height:36px;border-radius:6px;border:1px solid #597366;background:#1b3b2d;color:white;font-weight:700;cursor:pointer}
+#svDrawBar button.active{background:#d9bf62;color:#122219}
+#svDrawBar button:disabled{opacity:.45}
+#svDrawBar input[type=color]{width:38px;height:35px;padding:1px}
+#svDrawInfo{font-size:12px;color:#c9ddcf;width:100%}
+#svDrawOverlay{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;z-index:12!important;background:transparent!important;touch-action:none;pointer-events:none}
+</style>
+<script>
+/* SV MOBILE V2: independent, non-destructive manual annotations. */
+(()=>{
+ const stage=document.getElementById('mainVideoStage'),panel=document.getElementById('svReplayPanel');
+ if(!stage||!panel||document.getElementById('svDrawOverlay'))return;
+ const overlay=document.createElement('canvas');overlay.id='svDrawOverlay';stage.appendChild(overlay);
+ const bar=document.createElement('div');bar.id='svDrawBar';
+ bar.innerHTML='<button type="button" data-mode="line">직선</button><button type="button" data-mode="circle">원</button><button type="button" data-mode="angle">각도 3점</button><button type="button" data-mode="off" class="active">그리기 OFF</button><input type="color" id="svDrawColor" value="#f5d86a" aria-label="선 색상"><button type="button" id="svDrawUndo">되돌리기</button><button type="button" id="svDrawClear">전체 삭제</button><span id="svDrawInfo">영상을 정지한 뒤 직선·원·각도를 선택하세요.</span>';
+ stage.insertAdjacentElement('afterend',bar);
+ const info=document.getElementById('svDrawInfo'),ctx=overlay.getContext('2d');
+ let mode='off',shapes=[],anglePoints=[],dragStart=null,dragEnd=null,ink='#f5d86a';
+ const norm=(e)=>{const r=overlay.getBoundingClientRect();return {x:Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),y:Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))}};
+ const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+ function paint(){
+  const r=overlay.getBoundingClientRect(),w=Math.max(1,Math.round(r.width)),h=Math.max(1,Math.round(r.height));
+  if(overlay.width!==w||overlay.height!==h){overlay.width=w;overlay.height=h;}
+  ctx.clearRect(0,0,w,h);ctx.lineWidth=3;ctx.lineCap='round';ctx.lineJoin='round';
+  const xy=p=>({x:p.x*w,y:p.y*h});
+  function draw(shape){
+   ctx.strokeStyle=shape.color;ctx.fillStyle=shape.color;
+   if(shape.type==='line'||shape.type==='circle'){
+    const a=xy(shape.a),b=xy(shape.b);ctx.beginPath();
+    if(shape.type==='line'){ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y)}
+    else ctx.arc(a.x,a.y,Math.hypot(b.x-a.x,b.y-a.y),0,Math.PI*2);
+    ctx.stroke();
+   } else if(shape.type==='angle'){
+    const [a,b,c]=shape.points.map(xy);
+    ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.lineTo(c.x,c.y);ctx.stroke();
+    const v1={x:a.x-b.x,y:a.y-b.y},v2={x:c.x-b.x,y:c.y-b.y};
+    const l1=Math.hypot(v1.x,v1.y),l2=Math.hypot(v2.x,v2.y);
+    if(l1<5||l2<5)return;
+    const cosine=Math.max(-1,Math.min(1,(v1.x*v2.x+v1.y*v2.y)/(l1*l2)));
+    const deg=Math.acos(cosine)*180/Math.PI;
+    const tx=b.x+(v1.x/l1+v2.x/l2)*25,ty=b.y+(v1.y/l1+v2.y/l2)*25;
+    ctx.font='bold 17px sans-serif';ctx.lineWidth=4;ctx.strokeStyle='#07130d';ctx.strokeText(deg.toFixed(1)+'°',tx,ty);ctx.fillText(deg.toFixed(1)+'°',tx,ty);ctx.lineWidth=3;
+    for(const pt of [a,b,c]){ctx.beginPath();ctx.arc(pt.x,pt.y,4,0,Math.PI*2);ctx.fill();}
+   }
+  }
+  shapes.forEach(draw);
+  if(dragStart&&dragEnd)draw({type:mode,a:dragStart,b:dragEnd,color:ink});
+  if(anglePoints.length){ctx.fillStyle=ink;ctx.strokeStyle=ink;const pts=anglePoints.map(xy);pts.forEach(pt=>{ctx.beginPath();ctx.arc(pt.x,pt.y,5,0,Math.PI*2);ctx.fill()});if(pts.length===2){ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);ctx.lineTo(pts[1].x,pts[1].y);ctx.stroke()}}
+ }
+ function select(m){mode=m;anglePoints=[];dragStart=null;dragEnd=null;overlay.style.pointerEvents=m==='off'?'none':'auto';bar.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));info.textContent=m==='angle'?'각도의 첫 점 → 꼭짓점 → 마지막 점을 순서대로 누르세요.':m==='off'?'그리기 해제 · 기존 표시 유지':'영상 위를 손가락으로 드래그하세요.';paint();}
+ bar.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>select(b.dataset.mode)));
+ document.getElementById('svDrawColor').addEventListener('input',e=>ink=e.target.value);
+ document.getElementById('svDrawUndo').addEventListener('click',()=>{if(anglePoints.length)anglePoints=[];else shapes.pop();paint()});
+ document.getElementById('svDrawClear').addEventListener('click',()=>{shapes=[];anglePoints=[];paint()});
+ overlay.addEventListener('pointerdown',e=>{if(mode==='off')return;e.preventDefault();const p=norm(e);if(mode==='angle'){anglePoints.push(p);if(anglePoints.length===3){shapes.push({type:'angle',points:[...anglePoints],color:ink});anglePoints=[];info.textContent='각도 측정 완료 · 세 점을 다시 누르면 추가 측정됩니다.'}else info.textContent=anglePoints.length===1?'두 번째 점: 각도의 꼭짓점을 누르세요.':'세 번째 점: 마지막 방향점을 누르세요.';paint();return;}dragStart=p;dragEnd=p;overlay.setPointerCapture(e.pointerId);paint()});
+ overlay.addEventListener('pointermove',e=>{if(!dragStart)return;dragEnd=norm(e);paint()});
+ overlay.addEventListener('pointerup',e=>{if(!dragStart)return;const b=norm(e);if(dist(dragStart,b)>.008)shapes.push({type:mode,a:dragStart,b,color:ink});dragStart=null;dragEnd=null;paint()});
+ overlay.addEventListener('pointercancel',()=>{dragStart=null;dragEnd=null;paint()});
+ new ResizeObserver(paint).observe(stage);
+ // A rotation changes the image geometry; invalidate annotations rather than show misleading measurements.
+ const rotate=document.getElementById('frontRotateBtn');if(rotate)rotate.addEventListener('click',()=>{shapes=[];anglePoints=[];paint();info.textContent='영상 회전으로 이전 선·각도를 초기화했습니다.'});
+ paint();
+})();
+</script>
+
+<!-- SV MOBILE V3: mobile-only screen-first controls; no capture/detection/replay changes -->
+<style id="svMobileV3CompactUI">
+@media (max-width: 700px) and (pointer: coarse) {
+  html,body{height:100%!important;overflow:hidden!important}
+  .wrap{height:100dvh!important;max-height:100dvh!important;min-height:0!important;overflow:hidden!important;padding:2px!important;gap:2px!important}
+  .wrap:not(.live-first-mode){display:flex!important;flex-direction:column!important}
+  .wrap:not(.live-first-mode) #svLivePanel{flex:0 0 auto!important;min-height:0!important;padding:2px!important;overflow:hidden!important}
+  #svLivePanel>.controls{justify-content:flex-start!important;overflow-x:auto!important;flex-wrap:nowrap!important;scrollbar-width:none;gap:4px!important;overscroll-behavior-x:contain}
+  #svLivePanel>.controls::-webkit-scrollbar,#svReplayPanel .controls::-webkit-scrollbar,#svDrawBar::-webkit-scrollbar{display:none}
+  #svLivePanel>.controls>*{flex-shrink:0!important}
+  .wrap:not(.live-first-mode) #svReplayPanel{display:flex!important;flex-direction:column!important;flex:1 1 0!important;height:auto!important;min-height:0!important;max-height:none!important;overflow:hidden!important;padding:3px!important;margin:0!important;gap:3px!important}
+  .wrap:not(.live-first-mode) #svSideReplayPanel{display:none!important}
+  #svReplayPanel .dualTitle{flex:0 0 auto!important;height:21px!important;min-height:0!important;margin:0!important;font-size:12px!important}
+  #svReplayPanel .sub{font-size:10px!important;line-height:1.1!important;flex:0 0 auto!important}
+  .wrap:not(.live-first-mode) #mainVideoStage{display:block!important;flex:1 1 0!important;width:100%!important;height:0!important;min-height:100px!important;max-height:none!important;order:0!important}
+  #svReplayPanel #svDrawBar{display:flex!important;flex:0 0 auto!important;flex-wrap:nowrap!important;overflow-x:auto!important;scrollbar-width:none;gap:4px!important;margin:0!important;padding:3px!important;min-height:35px!important;align-items:center!important}
+  #svDrawBar button{height:29px!important;min-height:29px!important;padding:3px 8px!important;white-space:nowrap!important;flex:0 0 auto!important;font-size:11px!important}
+  #svDrawBar input[type=color]{width:29px!important;min-width:29px!important;height:29px!important;flex:0 0 auto!important}
+  #svDrawInfo{display:none!important}
+  #svReplayPanel .controls{flex:0 0 auto!important;flex-wrap:nowrap!important;justify-content:flex-start!important;overflow-x:auto!important;scrollbar-width:none;gap:4px!important;min-height:32px!important;margin:0!important;overscroll-behavior-x:contain}
+  #svReplayPanel .controls>*{flex-shrink:0!important}
+  #svReplayPanel .controls button{height:30px!important;min-height:30px!important;font-size:11px!important;white-space:nowrap!important;padding:3px 8px!important}
+  #svMobileLibraryBar,#svMobileSaveBar{flex:0 0 auto!important;flex-wrap:nowrap!important;margin:0!important;padding:3px 5px!important;min-height:34px!important;gap:5px!important}
+  #svMobileLibraryBar button,#svMobileSaveBtn{height:29px!important;min-height:29px!important;white-space:nowrap!important;padding:2px 8px!important}
+  #svMobileSaveStatus{min-width:0!important;overflow:hidden!important;white-space:nowrap!important;text-overflow:ellipsis!important;font-size:10px!important}
+  #svMobileLibraryBar .svFileLabel{min-width:0!important;font-size:10px!important}
+  #svReplayPanel .seekRow{flex:0 0 auto!important;height:24px!important;margin:0!important}
+  #svReplayPanel #result{flex:0 0 auto!important;max-height:17px!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important}
+  .wrap.live-first-mode #svLivePanel>.controls{justify-content:flex-start!important;overflow-x:auto!important}
+  .wrap.live-first-mode #svLivePanel>.controls>*{flex-shrink:0!important}
+}
+</style>
+
+<!-- SV MOBILE V4: camera connection diagnostics, no change to capture or replay logic -->
+<script>
+(function(){
+  function explainContext(){
+    if(window.isSecureContext && navigator.mediaDevices?.getUserMedia)return;
+    const status=document.getElementById('status');
+    if(status)status.textContent='카메라 사용 안내: 다운로드 파일(content:// 또는 file://)이 아닌 HTTPS 웹주소에서 실행하세요. 영상 불러오기와 기존 리플레이는 계속 사용할 수 있습니다.';
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',explainContext,{once:true});
+  else explainContext();
+})();
+</script>
+</body>
+</html>
