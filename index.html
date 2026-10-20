@@ -843,7 +843,7 @@ function svAxisSample(lm,check){
 function svAxisReport(){
  const t=svAxisTrace,labels=['골반 중앙','발 간격','무릎 간격','양손 간격','손 높이','손-골반','다리 길이'];
  return '\n\n[카메라·관절 좌표 진단]\n원본 영상 '+(raw.videoWidth||0)+'×'+(raw.videoHeight||0)+' / MediaPipe 입력 '+poseInput.width+'×'+poseInput.height+
- ' / 입력 회전 +90도 / 화면 회전 '+(window.svPreviewRotationDeg??90)+'도'+
+ ' / 입력 회전 +90도 / 화면 회전 '+(window.svPreviewRotationDeg??90)+'도 / 판정 좌표 '+(window.matchMedia('(orientation: portrait) and (pointer: coarse)').matches && raw.videoHeight>raw.videoWidth?'원본 세로축 복원':'기존 좌표')+
  '\n좌표 샘플 '+t.frames+'프레임 / 양발 X차이 0.02 미만 '+t.nearZeroFeet+'회 / 무릎 X차이 0.02 미만 '+t.nearZeroKnees+'회'+
  '\n관절 누락·저신뢰(0.20 미만): '+[11,12,15,16,23,24,25,26,27,28].map(i=>i+'='+ (t.missing[i]||0)).join(' ')+
  '\n조건 실패 횟수: '+labels.map((v,i)=>v+' '+t.failed[i]).join(' / ')+
@@ -948,6 +948,17 @@ function svAddressDiagnostic(lm,check,m){
     '\nLOCK '+(addressLocked?'ON':'OFF');
 }
 
+// Mobile portrait: the observed +90° MediaPipe frame has its anatomical
+// left/right axis on pose Y. Convert only analysis landmarks back to the
+// camera-source portrait axes. Rendering continues to use original landmarks.
+function svAddressAnalysisLandmarks(lm){
+  if(!lm)return lm;
+  const portraitPhone=window.matchMedia('(orientation: portrait) and (pointer: coarse)').matches;
+  const rotatedInput=raw.videoWidth>0 && raw.videoHeight>raw.videoWidth &&
+    poseInput.width===raw.videoHeight && poseInput.height===raw.videoWidth;
+  if(!portraitPhone || !rotatedInput)return lm;
+  return lm.map(p=>p?{...p,x:p.y,y:1-p.x}:p);
+}
 async function onResults(results){
   processing=false;
   lastPoseRenderAt=performance.now();
@@ -980,15 +991,16 @@ async function onResults(results){
   const rotated=latestLandmarks;
   drawSkeleton(rotated);
 
-  const m=poseMotionMetrics(rotated,now);
+  const analysisPose=svAddressAnalysisLandmarks(rotated);
+  const m=poseMotionMetrics(analysisPose,now);
   $('stable').textContent=m.stability.toFixed(3);
   $('wristSpeed').textContent=m.handSpeed.toFixed(2);
 
   // Always refresh diagnostics while pose frames arrive, even when swing detection is OFF.
-  const addressCheck=addressSimilarity(rotated);
+  const addressCheck=addressSimilarity(analysisPose);
   const isAddress=addressCheck.ok;
-  if(armed)svAxisSample(rotated,addressCheck);
-  svAddressDiagnostic(rotated,addressCheck,m);
+  if(armed)svAxisSample(analysisPose,addressCheck);
+  svAddressDiagnostic(analysisPose,addressCheck,m);
   if(!armed || cooldown) return;
   {const t=svReadyTrace,gap=t.lastAt?now-t.lastAt:0;if(!t.firstAt)t.firstAt=now;t.frames++;if(t.lastAt){t.gapSum+=gap;t.gapCount++;t.maxGap=Math.max(t.maxGap,gap);if(gap>450)t.over450++;}t.lastAt=now;t.lastScore=addressCheck.score;}
 
@@ -1001,10 +1013,10 @@ async function onResults(results){
     if(elapsed>450){if(svAddressCandidateSince){svReadyTrace.resets.frameGap++;svReadyTrace.lastReason='프레임 간격 '+Math.round(elapsed)+'ms';}svResetAddressCandidate();}
     // Confirm address from repeated pose geometry, not frame-to-frame pixel jitter.
     // Require a mostly stationary hip/ankle anchor over the whole 850ms window.
-    const hip=rotated[23]&&rotated[24]
-      ? {x:(rotated[23].x+rotated[24].x)/2,y:(rotated[23].y+rotated[24].y)/2}:null;
-    const ankle=rotated[27]&&rotated[28]
-      ? {x:(rotated[27].x+rotated[28].x)/2,y:(rotated[27].y+rotated[28].y)/2}:null;
+    const hip=analysisPose[23]&&analysisPose[24]
+      ? {x:(analysisPose[23].x+analysisPose[24].x)/2,y:(analysisPose[23].y+analysisPose[24].y)/2}:null;
+    const ankle=analysisPose[27]&&analysisPose[28]
+      ? {x:(analysisPose[27].x+analysisPose[28].x)/2,y:(analysisPose[27].y+analysisPose[28].y)/2}:null;
     const validGeometry=isAddress && hip && ankle &&
       [hip.x,hip.y,ankle.x,ankle.y].every(Number.isFinite) &&
       hip.x>=0 && hip.x<=1 && hip.y>=0 && hip.y<=1 &&
