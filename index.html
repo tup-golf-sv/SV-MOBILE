@@ -579,6 +579,15 @@ const SWING_SHOULDER_TURN=0.015;
 const MAX_PELVIS_SPEED=0.055;
 const MAX_ANKLE_SPEED=0.05;
 const SWING_CAPTURE_MS=3200;
+ // Auto-adaptive ADDRESS confirmation: tolerate short landmark dropouts,
+ // but require repeated real frames and recent low-motion evidence.
+ let svAddressCandidateSince=0,svAddressLastGood=0,svAddressGoodFrames=0,svAddressTotalFrames=0;
+ let svAddressMotionEMA=null,svAddressLastFrame=0;
+ const SV_ADDRESS_GAP_MS=180,SV_ADDRESS_MIN_GOOD_FRAMES=6;
+ function svResetAddressCandidate(){
+   svAddressCandidateSince=0;svAddressLastGood=0;svAddressGoodFrames=0;svAddressTotalFrames=0;svAddressMotionEMA=null;
+ }
+
 
 function tone(freq=880,d=.14){
   try{
@@ -914,7 +923,7 @@ async function onResults(results){
   if(!present){
     // Expose missing-pose state instead of leaving stale diagnostic numbers.
     svAddressDiagnostic(latestLandmarks,{ok:false,score:0,obviousOneLeg:false},{stability:NaN,pelvisSpeed:NaN,ankleSpeed:NaN});
-    ready=false;addressLocked=false;stableSince=0;swingStarted=false;lastPose=null;lastPoseTime=0;
+    ready=false;addressLocked=false;stableSince=0;svResetAddressCandidate();swingStarted=false;lastPose=null;lastPoseTime=0;
     $('stable').textContent='0.00';$('wristSpeed').textContent='0.00';
     $('addressState').textContent='OFF';$('swingState').textContent='대기';
     $('state').className='state wait';$('state').textContent='사람 없음 · 대기';
@@ -938,22 +947,38 @@ async function onResults(results){
 
   if(!ready && !swingStarted){
     // ADDRESS LOCK is mandatory. Without it, every movement is treated as normal movement.
-    const stableAddress =
-      isAddress &&
-      m.stability<0.020 &&
-      m.pelvisSpeed<MAX_PELVIS_SPEED &&
-      m.ankleSpeed<MAX_ANKLE_SPEED;
-
+    // Use a bounded temporal filter for noisy phone landmarks.
+    // A single frame cannot establish a pose or produce READY.
+    const elapsed=svAddressLastFrame?now-svAddressLastFrame:0;
+    svAddressLastFrame=now;
+    if(elapsed>450)svResetAddressCandidate();
+    const frameMotion=Math.max(m.stability/0.020,m.pelvisSpeed/MAX_PELVIS_SPEED,m.ankleSpeed/MAX_ANKLE_SPEED);
+    if(Number.isFinite(frameMotion)){
+      svAddressMotionEMA=svAddressMotionEMA===null?frameMotion:
+        (0.22*frameMotion+0.78*svAddressMotionEMA);
+    }
+    const stableAddress=isAddress && Number.isFinite(frameMotion) &&
+      (frameMotion<1 || (svAddressMotionEMA!==null && svAddressMotionEMA<1));
     if(stableAddress){
-      if(!stableSince) stableSince=now;
-      const held=now-stableSince;
+      if(!svAddressCandidateSince)svAddressCandidateSince=now;
+      svAddressLastGood=now;svAddressGoodFrames++;svAddressTotalFrames++;
+    }else if(svAddressCandidateSince && now-svAddressLastGood<=SV_ADDRESS_GAP_MS){
+      svAddressTotalFrames++; // brief dropout: retain candidate, not good-frame count
+    }else{
+      svResetAddressCandidate();
+    }
+    const held=svAddressCandidateSince?now-svAddressCandidateSince:0;
+    const confirmed=svAddressCandidateSince && svAddressGoodFrames>=SV_ADDRESS_MIN_GOOD_FRAMES &&
+      svAddressTotalFrames>0 && svAddressGoodFrames/svAddressTotalFrames>=0.70 &&
+      now-svAddressLastGood<=SV_ADDRESS_GAP_MS;
+    if(svAddressCandidateSince){
       $('addressState').textContent='CHECK '+addressCheck.score+'/7';
       $('state').className='state wait';
       $('state').textContent='어드레스 유사범위 확인 '+Math.min(STABLE_MS,held).toFixed(0)+' / '+STABLE_MS+' ms';
 
-      if(held>=STABLE_MS){
+      if(held>=STABLE_MS && confirmed){
         addressLocked=true;
-        ready=true;readyAt=now;stableSince=0;
+        ready=true;readyAt=now;stableSince=0;svResetAddressCandidate();
         $('addressState').textContent='LOCK';
         $('overlay').style.display='flex';
         $('state').className='state ready';$('state').textContent='READY';
@@ -1164,7 +1189,7 @@ $('connect').onclick=async()=>{
 };
 
 $('arm').onclick=()=>{
-  armed=!armed;ready=false;addressLocked=false;stableSince=0;swingStarted=false;lastPose=null;lastPoseTime=0;
+  armed=!armed;ready=false;addressLocked=false;stableSince=0;svResetAddressCandidate();swingStarted=false;lastPose=null;lastPoseTime=0;
   $('arm').textContent=armed?'스윙감지 OFF':'스윙감지 ON';
   $('state').className='state wait';
   $('addressState').textContent='OFF';$('state').textContent=armed?'사람/어드레스 대기':'대기';
@@ -2360,6 +2385,15 @@ const init=()=>{
 };
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 })();
+</script>
+<style id="svProductionDiagVisibility">
+/* Diagnostics are opt-in; ordinary golfers never need to configure camera focus. */
+body:not(.svDeveloperDiagnostics) #svAddressDiag,
+body:not(.svDeveloperDiagnostics) #svFocusAB{display:none!important}
+</style>
+<script id="svProductionDiagMode">
+if(new URLSearchParams(location.search).get('debug')==='1')
+ document.body.classList.add('svDeveloperDiagnostics');
 </script>
 </body>
 </html>
