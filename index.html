@@ -819,8 +819,9 @@ function svAddressDiagnostic(lm,check,m){
   if(!(m.ankleSpeed<MAX_ANKLE_SPEED))fail.push('발목 이동 초과');
   if(!fail.length)fail.push('자세 유지시간 확인 중');
   const fmt=v=>Number.isFinite(v)?v.toFixed(3):'UNKNOWN';
+  dock.querySelector('#svAddressDiagToggle').textContent='LOCK 진단 '+(armed?'ON':'OFF')+' · '+check.score+'/7 '+(dock.querySelector('#svAddressDiagDetail').hidden?'▸':'▾');
   dock.querySelector('#svAddressDiagDetail').textContent=
-    '점수 '+check.score+'/7 · 하체 '+(missing.some(i=>i>=25)?'인식 부족':'인식 확인')+
+    '감지 '+(armed?'ON':'OFF')+' · 쿨다운 '+(cooldown?'ON':'OFF')+'\n점수 '+check.score+'/7 · 하체 '+(missing.some(i=>i>=25)?'인식 부족':'인식 확인')+
     '\n안정도 '+fmt(m.stability)+' / 0.020'+
     '\n골반속도 '+fmt(m.pelvisSpeed)+' / '+MAX_PELVIS_SPEED+
     '\n발목속도 '+fmt(m.ankleSpeed)+' / '+MAX_ANKLE_SPEED+
@@ -846,6 +847,8 @@ async function onResults(results){
   $('presence').textContent=present?'사람 있음':'사람 없음';
 
   if(!present){
+    // Expose missing-pose state instead of leaving stale diagnostic numbers.
+    svAddressDiagnostic(latestLandmarks,{ok:false,score:0,obviousOneLeg:false},{stability:NaN,pelvisSpeed:NaN,ankleSpeed:NaN});
     ready=false;addressLocked=false;stableSince=0;swingStarted=false;lastPose=null;lastPoseTime=0;
     $('stable').textContent='0.00';$('wristSpeed').textContent='0.00';
     $('addressState').textContent='OFF';$('swingState').textContent='대기';
@@ -862,11 +865,11 @@ async function onResults(results){
   $('stable').textContent=m.stability.toFixed(3);
   $('wristSpeed').textContent=m.handSpeed.toFixed(2);
 
-  if(!armed || cooldown) return;
-
+  // Always refresh diagnostics while pose frames arrive, even when swing detection is OFF.
   const addressCheck=addressSimilarity(rotated);
   const isAddress=addressCheck.ok;
   svAddressDiagnostic(rotated,addressCheck,m);
+  if(!armed || cooldown) return;
 
   if(!ready && !swingStarted){
     // ADDRESS LOCK is mandatory. Without it, every movement is treated as normal movement.
