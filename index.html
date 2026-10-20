@@ -2232,5 +2232,24 @@ body #svCameraRotateBtn{top:calc(env(safe-area-inset-top,0px) + 107px)!important
 
 @media(max-height:440px){#svAddressDiag{bottom:8px;max-width:220px;font-size:10px}}
 </style>
+<script id="svAddressDiagStartup">
+(()=>{
+ const init=()=>{
+   try{
+     if(typeof svAddressDiagnostic==='function'){
+       svAddressDiagnostic(null,{ok:false,score:0,obviousOneLeg:false},{stability:NaN,pelvisSpeed:NaN,ankleSpeed:NaN});
+     }
+   }catch(err){
+     const el=document.createElement('div');
+     el.id='svAddressDiagStartupError';
+     el.textContent='LOCK 진단 실행 오류: '+String(err?.message||err);
+     el.style.cssText='position:fixed;left:8px;bottom:70px;z-index:99999;padding:10px;background:#402;color:white;font:12px sans-serif';
+     document.body.appendChild(el);
+   }
+ };
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});
+ else init();
+})();
+</script>
 </body>
 </html>
