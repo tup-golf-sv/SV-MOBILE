@@ -705,21 +705,32 @@ function addressSimilarity(lm){
 // object-fit:contain camera pixels, then apply the user's display rotation.
 // This is DISPLAY ONLY: address/READY logic still receives original landmarks.
 function svPoseDisplayPoint(p){
-  const stage=$('liveStage');
+  // MediaPipe receives the camera source rotated +90 degrees.
+  // Invert that rotation to source pixels, then reproduce the *actual*
+  // HTMLVideoElement object-fit:contain mapping and its CSS rotation.
+  // Use measured DOM sizes, not a guessed stage aspect ratio.
   const W=view.width,H=view.height;
-  if(!stage||!raw.videoWidth||!raw.videoHeight)return {x:p.x*W,y:p.y*H};
-  const angle=((window.svPreviewRotationDeg??90)%360+360)%360;
-  const quarter=angle%180!==0;
-  const boxW=quarter?stage.clientHeight:stage.clientWidth;
-  const boxH=quarter?stage.clientWidth:stage.clientHeight;
-  const scale=Math.min(boxW/raw.videoWidth,boxH/raw.videoHeight);
-  // The pose input is the original camera frame rotated +90 degrees.
+  if(!raw.videoWidth||!raw.videoHeight)return {x:p.x*W,y:p.y*H};
   const sourceX=p.y,sourceY=1-p.x;
-  const dx=(sourceX-.5)*raw.videoWidth*scale;
-  const dy=(sourceY-.5)*raw.videoHeight*scale;
+  const vw=raw.videoWidth,vh=raw.videoHeight;
+  const boxW=raw.clientWidth,boxH=raw.clientHeight;
+  if(!boxW||!boxH)return {x:p.x*W,y:p.y*H};
+  const style=getComputedStyle(raw);
+  const fit=style.objectFit;
+  const scale=fit==='cover'?Math.max(boxW/vw,boxH/vh):
+              fit==='fill'?null:Math.min(boxW/vw,boxH/vh);
+  const dx=(sourceX-.5)*vw*(scale===null?boxW/vw:scale);
+  const dy=(sourceY-.5)*vh*(scale===null?boxH/vh:scale);
+  const angle=((window.svPreviewRotationDeg??90)%360+360)%360;
   const rad=angle*Math.PI/180;
-  return {x:W/2+dx*Math.cos(rad)-dy*Math.sin(rad),
-          y:H/2+dx*Math.sin(rad)+dy*Math.cos(rad)};
+  // raw and view are centered on the same liveStage, but the canvas
+  // can have a different CSS pixel origin; account for that explicitly.
+  const stageRect=$('liveStage').getBoundingClientRect();
+  const viewRect=view.getBoundingClientRect();
+  const centerX=stageRect.left+stageRect.width/2-viewRect.left;
+  const centerY=stageRect.top+stageRect.height/2-viewRect.top;
+  return {x:centerX+dx*Math.cos(rad)-dy*Math.sin(rad),
+          y:centerY+dx*Math.sin(rad)+dy*Math.cos(rad)};
 }
 function drawSkeleton(lm){
   if(!lm)return;
