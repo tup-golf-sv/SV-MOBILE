@@ -2687,49 +2687,6 @@ body>#speedMenu .speedChoice{min-height:36px!important;white-space:nowrap!import
 })();
 </script>
 
-<!-- SV MOBILE camera framing guide: overlay only, no camera or pose pipeline changes -->
-<style id="svFramingGuideStyle">
-#svFramingGuide{position:absolute;inset:0;z-index:2;pointer-events:none;display:none}
-#svFramingGuide svg{width:100%;height:100%;display:block}
-#svFramingGuideMode{position:absolute;left:8px;top:8px;z-index:4;display:none;
-height:28px;padding:3px 9px;border:1px solid #a7d8d2aa;border-radius:7px;
-background:#082a2ac9;color:#d7f8f5;font:700 11px Arial,sans-serif}
-</style>
-<script id="svFramingGuideScript">
-(()=>{
- const init=()=>{
-  const stage=document.getElementById('liveStage');
-  const connect=document.getElementById('connect');
-  const arm=document.getElementById('arm');
-  const disconnect=document.getElementById('disconnect');
-  if(!stage||!connect||!arm||!disconnect||document.getElementById('svFramingGuide'))return;
-  const guide=document.createElement('div');guide.id='svFramingGuide';
-  const mode=document.createElement('button');mode.id='svFramingGuideMode';mode.type='button';
-  mode.setAttribute('aria-label','촬영 가이드 정면 측면 전환');
-  let side=false, active=false;
-  const draw=()=>{
-   mode.textContent=side?'가이드: 측면 ↔':'가이드: 정면 ↔';
-   const human=side
-    ? '<circle cx="53" cy="25" r="7"/><path d="M50 33 Q40 41 44 57 L55 71 L66 69 L62 49 L58 35 Z M46 44 L63 62 L76 71 M56 71 L51 109 L46 117 M64 70 L69 107 L74 117"/>'
-    : '<circle cx="55" cy="25" r="7"/><path d="M47 34 L41 68 L47 73 L63 73 L69 68 L63 34 Z M44 39 L30 66 L46 72 M66 39 L80 66 L64 72 M49 73 L42 108 L38 117 M61 73 L68 108 L72 117"/>';
-   guide.innerHTML='<svg viewBox="0 0 110 145" preserveAspectRatio="xMidYMid meet" aria-hidden="true">'
-    +'<rect x="6" y="6" width="98" height="133" rx="3" fill="none" stroke="#8ce3dc" stroke-opacity=".30" stroke-dasharray="3 4" stroke-width=".55"/>'
-    +'<g transform="translate(0 5)" fill="none" stroke="#9cf3eb" stroke-opacity=".64" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="2.6 2.2">'+human+'</g>'
-    +'<text x="55" y="134" fill="#c0eee9" fill-opacity=".78" text-anchor="middle" font-size="4.6">SWING FRAME GUIDE</text></svg>';
-  };
-  const show=on=>{active=on;guide.style.display=on?'block':'none';mode.style.display=on?'block':'none'};
-  mode.addEventListener('click',()=>{side=!side;draw()});
-  connect.addEventListener('click',()=>{setTimeout(()=>{const raw=document.getElementById('raw');if(raw?.srcObject)show(true)},700)});
-  arm.addEventListener('click',()=>{if(!arm.disabled)show(false)});
-  disconnect.addEventListener('click',()=>show(false));
-  document.getElementById('cameraSelect')?.addEventListener('change',()=>show(false));
-  const raw=document.getElementById('raw');
-  raw?.addEventListener('playing',()=>{if(!arm.disabled&&!active)show(true)});
-  stage.append(guide,mode);draw();
- };
- if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});
- else init();
-})();
-</script>
+
 </body>
 </html>
