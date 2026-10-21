@@ -2481,5 +2481,21 @@ body:not(.svDeveloperDiagnostics) #svFocusAB{display:none!important}
 if(new URLSearchParams(location.search).get('debug')==='1')
  document.body.classList.add('svDeveloperDiagnostics');
 </script>
+
+<!-- SV MOBILE: compact controls, preserve A/B handlers and camera/READY logic -->
+<style id="svMobileControlLayoutFix">
+/* Hide unused transfer controls without deleting their JS-referenced elements. */
+#sendA,#sendB{display:none!important}
+/* Place camera rotation beside the file controls, above the image area. */
+body #svCameraRotateBtn{
+  position:fixed!important;
+  top:calc(env(safe-area-inset-top,0px) + 66px)!important;
+  right:clamp(8px,2vw,16px)!important;
+  left:auto!important;
+  min-width:62px!important;
+  height:38px!important;
+  z-index:5100!important;
+}
+</style>
 </body>
 </html>
