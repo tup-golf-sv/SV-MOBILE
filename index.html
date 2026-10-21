@@ -2574,5 +2574,18 @@ body #svCameraRotateBtn{
  else init();
 })();
 </script>
+
+<!-- SV MOBILE: rotation control anchored to viewport lower-left -->
+<style id="svRotateViewportLowerLeft">
+body #svCameraRotateBtn{
+ position:fixed!important;
+ left:8px!important;
+ right:auto!important;
+ top:auto!important;
+ bottom:calc(env(safe-area-inset-bottom,0px) + 82px)!important;
+ transform:none!important;
+ z-index:5100!important;
+}
+</style>
 </body>
 </html>
