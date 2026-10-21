@@ -2497,5 +2497,43 @@ body #svCameraRotateBtn{
   z-index:5100!important;
 }
 </style>
+
+<!-- SV MOBILE: drawing dropdown at measured upper-right camera-bar edge -->
+<style id="svDrawUpperRightMeasured">
+body #svDrawDock{
+ position:fixed!important;
+ top:var(--sv-draw-upper-top,56px)!important;
+ right:var(--sv-right,8px)!important;
+ left:auto!important;
+ bottom:auto!important;
+ flex-direction:column-reverse!important;
+ align-items:flex-end!important;
+ max-height:calc(100dvh - var(--sv-draw-upper-top,56px) - 12px)!important;
+}
+body #svDrawDock #svDrawBar{
+ max-height:calc(100dvh - var(--sv-draw-upper-top,56px) - 58px)!important;
+ overflow-y:auto!important;
+}
+</style>
+<script id="svDrawUpperRightMeasure">
+(()=>{
+ const init=()=>{
+  const dock=document.getElementById('svDrawDock');
+  const camera=document.getElementById('svFloatingCamera');
+  if(!dock||!camera)return;
+  const measure=()=>{
+   const r=camera.getBoundingClientRect();
+   const bottom=Math.max(0,r.bottom);
+   document.documentElement.style.setProperty('--sv-draw-upper-top',Math.ceil(bottom+6)+'px');
+  };
+  measure();
+  window.addEventListener('resize',measure);
+  window.visualViewport?.addEventListener('resize',measure);
+  if(typeof ResizeObserver!=='undefined')new ResizeObserver(measure).observe(camera);
+ };
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});
+ else init();
+})();
+</script>
 </body>
 </html>
