@@ -1,0 +1,20 @@
+{
+  "name": "T.UP SV MOBILE",
+  "short_name": "SV MOBILE",
+  "description": "T.UP GOLF ACADEMY 스윙 영상 분석",
+  "lang": "ko",
+  "start_url": "/SV-MOBILE/",
+  "scope": "/SV-MOBILE/",
+  "display": "standalone",
+  "background_color": "#07140f",
+  "theme_color": "#07140f",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "./sv-mobile-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
