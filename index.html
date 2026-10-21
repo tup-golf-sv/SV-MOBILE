@@ -2535,5 +2535,44 @@ body #svDrawDock #svDrawBar{
  else init();
 })();
 </script>
+
+<!-- SV MOBILE: rotate lower-left, hide A/B transfer controls -->
+<style id="svRotateLowerLeftLayout">
+body #sendA,body #sendB{display:none!important}
+body #svCameraRotateBtn{
+ position:fixed!important;
+ top:var(--sv-rotate-lower-top,calc(100dvh - 110px))!important;
+ left:var(--sv-rotate-lower-left,8px)!important;
+ right:auto!important;
+ bottom:auto!important;
+ min-width:54px!important;
+ height:36px!important;
+ z-index:5100!important;
+}
+</style>
+<script id="svRotateLowerLeftMeasure">
+(()=>{
+ const init=()=>{
+  const stage=document.getElementById('mainVideoStage');
+  if(!stage)return;
+  const update=()=>{
+   const r=stage.getBoundingClientRect();
+   const vp=window.visualViewport;
+   const h=vp?.height||window.innerHeight;
+   const top=Math.max(8,Math.min(h-44,r.bottom-44));
+   const left=Math.max(6,r.left+8);
+   document.documentElement.style.setProperty('--sv-rotate-lower-top',Math.round(top)+'px');
+   document.documentElement.style.setProperty('--sv-rotate-lower-left',Math.round(left)+'px');
+  };
+  update();
+  window.addEventListener('resize',update);
+  window.addEventListener('orientationchange',update);
+  window.visualViewport?.addEventListener('resize',update);
+  if(typeof ResizeObserver!=='undefined')new ResizeObserver(update).observe(stage);
+ };
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});
+ else init();
+})();
+</script>
 </body>
 </html>
