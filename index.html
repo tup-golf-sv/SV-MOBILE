@@ -2605,5 +2605,49 @@ body .svAcademyBrand.bottom span{
  text-align:right!important;
 }
 </style>
+
+<!-- SV MOBILE: speed dropdown outside horizontally scrolling replay toolbar -->
+<style id="svSpeedMenuPortalStyle">
+body>#speedMenu{
+ position:fixed!important;
+ z-index:9500!important;
+ bottom:auto!important;
+ right:auto!important;
+ max-height:min(52dvh,320px)!important;
+ overflow-y:auto!important;
+ min-width:96px!important;
+}
+body>#speedMenu .speedChoice{min-height:36px!important;white-space:nowrap!important}
+</style>
+<script id="svSpeedMenuPortalFix">
+(()=>{
+ const init=()=>{
+  const button=document.getElementById('speedMenuBtn');
+  const menu=document.getElementById('speedMenu');
+  if(!button||!menu)return;
+  // Preserve existing button and choice handlers. Move only the menu to avoid
+  // clipping by the replay toolbar's overflow-x:auto.
+  document.body.appendChild(menu);
+  const position=()=>{
+   const r=button.getBoundingClientRect();
+   const w=window.visualViewport?.width||window.innerWidth;
+   const h=window.visualViewport?.height||window.innerHeight;
+   const mw=menu.offsetWidth||104;
+   const mh=menu.offsetHeight||240;
+   const x=Math.max(6,Math.min(w-mw-6,r.right-mw));
+   const y=Math.max(6,Math.min(h-mh-6,r.top-mh-6));
+   menu.style.setProperty('left',Math.round(x)+'px','important');
+   menu.style.setProperty('top',Math.round(y)+'px','important');
+  };
+  button.addEventListener('click',()=>{
+   if(menu.style.display!=='none')position();
+  });
+  window.addEventListener('resize',()=>{if(menu.style.display!=='none')position()});
+  window.visualViewport?.addEventListener('resize',()=>{if(menu.style.display!=='none')position()});
+ };
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});
+ else init();
+})();
+</script>
 </body>
 </html>
