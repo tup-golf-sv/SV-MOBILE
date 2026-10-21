@@ -2688,5 +2688,37 @@ body>#speedMenu .speedChoice{min-height:36px!important;white-space:nowrap!import
 </script>
 
 
+
+<!-- SV MOBILE: trajectory visibility control (tracking engine pending validation) -->
+<style id="svTrailToggleStyle">
+#svTrailToggle{height:32px;min-height:32px;padding:3px 9px;border-radius:8px;border:1px solid #628c80;
+background:#34493f;color:#fff;font:700 12px Arial,sans-serif;white-space:nowrap}
+#svTrailToggle[aria-pressed="true"]{background:#176b78;border-color:#6ad7eb;color:#eaffff}
+</style>
+<script id="svTrailToggleScript">
+(()=>{
+ const init=()=>{
+  const bar=document.getElementById('svFloatingReplay')||
+            document.getElementById('replayPlay')?.parentElement;
+  if(!bar||document.getElementById('svTrailToggle'))return;
+  const btn=document.createElement('button');
+  btn.id='svTrailToggle';btn.type='button';
+  btn.textContent='궤적보기 OFF';btn.setAttribute('aria-pressed','false');
+  btn.title='클럽헤드 궤적 표시 설정 (자동 검출 기능 준비 중)';
+  window.svClubTrailVisible=false;
+  btn.addEventListener('click',()=>{
+    window.svClubTrailVisible=!window.svClubTrailVisible;
+    btn.setAttribute('aria-pressed',String(window.svClubTrailVisible));
+    btn.textContent='궤적보기 '+(window.svClubTrailVisible?'ON':'OFF');
+    document.dispatchEvent(new CustomEvent('sv-club-trail-visibility',{detail:{visible:window.svClubTrailVisible}}));
+  });
+  const anchor=document.getElementById('frontJointBtn');
+  if(anchor&&anchor.parentElement===bar)anchor.insertAdjacentElement('afterend',btn);
+  else bar.appendChild(btn);
+ };
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});
+ else init();
+})();
+</script>
 </body>
 </html>
