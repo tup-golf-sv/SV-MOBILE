@@ -785,9 +785,14 @@ function drawSkeleton(lm){
 function startRecording(){
   if(recording || !stream) return;
   chunks=[];
+  // Choose only a recording format actually supported by this browser.
+  // Safari/iOS commonly supports MP4, while Chromium browsers may prefer WebM.
   let opt={};
-  if(MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) opt={mimeType:'video/webm;codecs=vp8'};
-  else if(MediaRecorder.isTypeSupported('video/webm')) opt={mimeType:'video/webm'};
+  const formats=['video/webm;codecs=vp8','video/webm','video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4'];
+  if(typeof MediaRecorder.isTypeSupported==='function'){
+    const format=formats.find(type=>MediaRecorder.isTypeSupported(type));
+    if(format) opt={mimeType:format};
+  }
   recorder=new MediaRecorder(stream,opt);
   recorder.ondataavailable=e=>{if(e.data.size) chunks.push(e.data)};
   recorder.onstop=()=>{
