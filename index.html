@@ -2750,5 +2750,35 @@ const init=()=>{const el=document.getElementById('svAutoReplaySpeed');if(!el)ret
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 })();
 </script>
+<script id="svEqualReplayButtonWidths">
+(()=>{
+ const sync=()=>{
+  const bar=document.getElementById('svFloatingReplay');
+  const joint=document.getElementById('frontJointBtn');
+  if(!bar||!joint||joint.parentElement!==bar)return;
+  // The joint button retains its native measured width; other visible controls match it.
+  const width=joint.getBoundingClientRect().width;
+  if(!Number.isFinite(width)||width<40)return;
+  ['svTrailToggle','replayPause','replayPlay'].forEach(id=>{
+   const button=document.getElementById(id);
+   if(!button||button.parentElement!==bar)return;
+   const w=width+'px';
+   button.style.setProperty('width',w,'important');
+   button.style.setProperty('min-width',w,'important');
+   button.style.setProperty('max-width',w,'important');
+   button.style.setProperty('flex','0 0 '+w,'important');
+   button.style.setProperty('box-sizing','border-box','important');
+  });
+ };
+ const init=()=>{
+  sync();
+  const joint=document.getElementById('frontJointBtn');
+  if(joint&&typeof ResizeObserver!=='undefined')new ResizeObserver(sync).observe(joint);
+  const bar=document.getElementById('svFloatingReplay');
+  if(bar&&typeof MutationObserver!=='undefined')new MutationObserver(sync).observe(bar,{childList:true});
+ };
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
+})();
+</script>
 </body>
 </html>
