@@ -2077,12 +2077,9 @@ $('disconnect').onclick=()=>{
         x.lineWidth=1;x.beginPath();x.moveTo(p.x,p.y);x.lineTo(q.x,q.y);x.stroke();
       }
     }
-    // Original baseline-1 dot effect: copied unchanged from preserved file.
-    const trailColors={13:'255,165,0',15:'255,72,72',14:'48,205,94',16:'50,145,255'};
-    if(window.svJointLineEnabled!==true){
     // Draw a clearly visible dotted trace between consecutive *measured* poses.
     // Interpolation only fills the visual gaps between adjacent valid samples.
-
+    const trailColors={13:'255,165,0',15:'255,72,72',14:'48,205,94',16:'50,145,255'};
     for(const i of [13,15,14,16]){
       let prev=null;
       for(const frame of hist){
@@ -2112,9 +2109,8 @@ $('disconnect').onclick=()=>{
         prev={t:frame.t,p};
       }
     }
-    }else{
-      // Original baseline-2 accumulated trajectory effect.
-
+    // Baseline 2: add the measured line effect only when enabled.
+    if(window.svJointLineEnabled===true){
     const pathFrames=replaySwingPathHistory[which];
     if(!pathFrames.length||Math.abs(time-pathFrames[pathFrames.length-1].t)>.008){
       pathFrames.push({t:time,pts:{13:pts[13],14:pts[14],15:pts[15],16:pts[16]}});
@@ -3043,7 +3039,7 @@ background:#34493f;color:#fff;font:700 12px Arial,sans-serif;white-space:nowrap}
   const btn=document.createElement('button');
   btn.id='svTrailToggle';btn.type='button';
   btn.textContent='궤적선 OFF';btn.setAttribute('aria-pressed','false');
-  btn.title='관절 ON 상태에서 점 궤적과 궤적선 전환';
+  btn.title='관절 점 효과에 궤적선 추가/제거';
   window.svJointLineEnabled=false;
   btn.addEventListener('click',()=>{
     window.svJointLineEnabled=!window.svJointLineEnabled;
