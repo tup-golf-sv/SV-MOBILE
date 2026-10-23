@@ -2065,25 +2065,39 @@ $('disconnect').onclick=()=>{
     if(!hist.length||Math.abs(hist[hist.length-1].t-time)>.008)hist.push({t:time,pts});
     while(hist.length&&time-hist[0].t>.8)hist.shift();
     x.save();x.lineCap='round';x.lineJoin='round';
+    // Keep faint whole-body exposure as context, rather than dense white spokes.
     for(const frame of hist){
       const alpha=Math.max(0,1-(time-frame.t)/.8);
       if(alpha<=0)continue;
       for(const [a,b] of pairs){
         const p=frame.pts[a],q=frame.pts[b];if(!p||!q)continue;
-        x.strokeStyle='rgba(255,255,255,'+(alpha*.28).toFixed(3)+')';
-        x.lineWidth=1.5;x.beginPath();x.moveTo(p.x,p.y);x.lineTo(q.x,q.y);x.stroke();
+        x.strokeStyle='rgba(255,255,255,'+(alpha*.075).toFixed(3)+')';
+        x.lineWidth=1;x.beginPath();x.moveTo(p.x,p.y);x.lineTo(q.x,q.y);x.stroke();
+      }
+    }
+    // Dotted 0.8s wrist/elbow trajectories, from actual sampled joint positions.
+    // No synthetic interpolation across missing frames or tracking gaps.
+    const trailColors={13:'255,165,0',15:'255,72,72',14:'48,205,94',16:'50,145,255'};
+    for(const i of [13,15,14,16]){
+      for(const frame of hist){
+        const p=frame.pts[i];if(!p)continue;
+        const alpha=Math.max(0,1-(time-frame.t)/.8);
+        if(alpha<=0)continue;
+        const radius=(i===15||i===16?3.3:2.8);
+        x.fillStyle='rgba('+trailColors[i]+','+(.18+.77*alpha).toFixed(3)+')';
+        x.beginPath();x.arc(p.x,p.y,radius,0,Math.PI*2);x.fill();
       }
     }
     for(const [a,b] of pairs){
       const p=pts[a],q=pts[b];if(!p||!q)continue;
-      x.strokeStyle='rgba(255,255,255,.90)';
-      x.lineWidth=2.2;x.beginPath();x.moveTo(p.x,p.y);x.lineTo(q.x,q.y);x.stroke();
+      x.strokeStyle='rgba(255,255,255,.85)';
+      x.lineWidth=1.7;x.beginPath();x.moveTo(p.x,p.y);x.lineTo(q.x,q.y);x.stroke();
     }
     for(const i of [11,12,13,14,15,16,23,24,25,26,27,28]){
       const p=pts[i];if(!p)continue;
-      const rgb=i===15?'255,72,72':i===13?'255,165,0':i===16?'50,145,255':i===14?'48,205,94':'255,255,255';
-      x.fillStyle='rgba('+rgb+',.95)';
-      x.beginPath();x.arc(p.x,p.y,i===15||i===16?5.5:4.2,0,Math.PI*2);x.fill();
+      const rgb=trailColors[i]||'255,255,255';
+      x.fillStyle='rgba('+rgb+',.98)';
+      x.beginPath();x.arc(p.x,p.y,i===15||i===16?5:4,0,Math.PI*2);x.fill();
     }
     x.restore();
   }
