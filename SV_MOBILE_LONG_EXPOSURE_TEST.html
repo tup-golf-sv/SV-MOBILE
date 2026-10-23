@@ -2052,11 +2052,10 @@ $('disconnect').onclick=()=>{
     const inputH=(which==='front'?frontJointInput:sideJointInput).height;
     const scale=Math.min(w/inputW,h/inputH);
     const imageX=(w-inputW*scale)/2,imageY=(h-inputH*scale)/2;
-    // R8: 1.5-second full-body connection exposure, based on replay video time.
-    // Pause does not add frames; seeking backwards resets history above.
+    // 0.8-second replay exposure; arm distinction applies to elbow/wrist dots only.
+    // Coordinates are projected into the displayed contain-fit video rectangle.
+    const project=p=>({x:imageX+p.x*inputW*scale,y:imageY+p.y*inputH*scale});
     const pairs=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
-    const color=(a,b)=>((a===11&&b===13)||(a===13&&b===15))?'255,72,72':
-      ((a===12&&b===14)||(a===14&&b===16))?'50,145,255':'255,255,255';
     const pts={};
     for(const i of [11,12,13,14,15,16,23,24,25,26,27,28]){
       const p=lm[i];
@@ -2064,25 +2063,25 @@ $('disconnect').onclick=()=>{
     }
     const hist=replaySkeletonHistory[which];
     if(!hist.length||Math.abs(hist[hist.length-1].t-time)>.008)hist.push({t:time,pts});
-    while(hist.length&&time-hist[0].t>1.5)hist.shift();
+    while(hist.length&&time-hist[0].t>.8)hist.shift();
     x.save();x.lineCap='round';x.lineJoin='round';
     for(const frame of hist){
-      const alpha=Math.max(0,1-(time-frame.t)/1.5);
+      const alpha=Math.max(0,1-(time-frame.t)/.8);
       if(alpha<=0)continue;
       for(const [a,b] of pairs){
         const p=frame.pts[a],q=frame.pts[b];if(!p||!q)continue;
-        x.strokeStyle='rgba('+color(a,b)+','+(alpha*.30).toFixed(3)+')';
+        x.strokeStyle='rgba(255,255,255,'+(alpha*.28).toFixed(3)+')';
         x.lineWidth=1.5;x.beginPath();x.moveTo(p.x,p.y);x.lineTo(q.x,q.y);x.stroke();
       }
     }
     for(const [a,b] of pairs){
       const p=pts[a],q=pts[b];if(!p||!q)continue;
-      x.strokeStyle='rgba('+color(a,b)+',.90)';
+      x.strokeStyle='rgba(255,255,255,.90)';
       x.lineWidth=2.2;x.beginPath();x.moveTo(p.x,p.y);x.lineTo(q.x,q.y);x.stroke();
     }
     for(const i of [11,12,13,14,15,16,23,24,25,26,27,28]){
       const p=pts[i];if(!p)continue;
-      const rgb=[11,13,15].includes(i)?'255,72,72':[12,14,16].includes(i)?'50,145,255':'255,255,255';
+      const rgb=(i===13||i===15)?'255,72,72':(i===14||i===16)?'50,145,255':'255,255,255';
       x.fillStyle='rgba('+rgb+',.95)';
       x.beginPath();x.arc(p.x,p.y,i===15||i===16?5.5:4.2,0,Math.PI*2);x.fill();
     }
