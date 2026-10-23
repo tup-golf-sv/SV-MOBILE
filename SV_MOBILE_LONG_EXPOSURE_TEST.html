@@ -502,7 +502,6 @@ body>#svFloatingReplay #svAutoReplaySpeed{height:34px!important;min-height:0!imp
  body>#svFloatingReplay button{font-size:10px!important;padding:3px 5px!important}
 }
 </style>
-
 </head>
 <body>
 <div class="wrap">
@@ -546,7 +545,7 @@ body>#svFloatingReplay #svAutoReplaySpeed{height:34px!important;min-height:0!imp
 </div>
 <video id="replay" playsinline loop muted></video>
 <div class="controls">
-  <button id="frontJointBtn" class="dark" disabled>관절 OFF</button>
+  <button id="frontJointBtn" class="dark" disabled>관절보기 OFF</button>
   <button id="replayPause" class="dark" disabled>일시정지</button>
   <button id="sendA" class="green" disabled>A화면 보내기</button>
   <button id="sendB" class="green" disabled>B화면 보내기</button>
@@ -1626,7 +1625,7 @@ $('disconnect').onclick=()=>{
       <button id="sidePause" class="dark" disabled>정지</button>
       <button id="sideSendA" class="green" disabled>A화면 보내기</button>
       <button id="sideSendB" class="green" disabled>B화면 보내기</button>
-      <button id="sideJointBtn" class="dark" disabled>관절 OFF</button>
+      <button id="sideJointBtn" class="dark" disabled>관절보기 OFF</button>
       <button id="sideFrameBack" class="white" disabled>◀1F</button>
       <button id="sideFrameNext" class="white" disabled>1F▶</button>
       <select id="sideSpeed" class="white" disabled>
@@ -2022,13 +2021,6 @@ $('disconnect').onclick=()=>{
   const replayTrailLastTime={front:-1,side:-1};
   const replaySkeletonHistory={front:[],side:[]};
   const replaySwingPathHistory={front:[],side:[]};
-  const svTrailMode={front:1,side:1}; // 1=original dotted effect, 2=dots + trajectory lines
-  document.addEventListener('sv-joint-trail-lines',event=>{
-    const mode=event.detail?.visible?2:1;
-    svTrailMode.front=mode;svTrailMode.side=mode;
-    resetReplayTrails('front');resetReplayTrails('side');
-    clearJointCanvas('front');clearJointCanvas('side');
-  });
   function resetReplayTrails(which){
     for(const i of [13,14,15,16])replayTrailData[which][i].length=0;
     replayTrailLastTime[which]=-1;
@@ -2093,69 +2085,40 @@ $('disconnect').onclick=()=>{
       pathFrames.push({t:time,pts:{13:pts[13],14:pts[14],15:pts[15],16:pts[16]}});
     }
     while(pathFrames.length&&time-pathFrames[0].t>8)pathFrames.shift();
-    if(svTrailMode[which]===1){
-      // Exact baseline candidate 1 measured dotted trail implementation.
     for(const i of [13,15,14,16]){
-      let prev=null;
-      for(const frame of hist){
+      // Replay poses are sampled much more sparsely than the original LIVE
+      // camera stream. Preserve a valid measured path across normal gaps.
+      const maxJump=Math.max(45,Math.min(w,h)*.30);
+      let prev=null,run=[];const runs=[];
+      for(const frame of pathFrames){
         const p=frame.pts[i];
-        if(!p){prev=null;continue;}
+        if(!p){if(run.length)runs.push(run);run=[];prev=null;continue;}
         if(prev){
           const dt=frame.t-prev.t;
-          const dist=Math.hypot(p.x-prev.p.x,p.y-prev.p.y);
-          // Do not connect across missing/large temporal gaps or implausible jumps.
-          if(dt>0&&dt<=.22&&dist<=Math.max(w,h)*.32){
-            const steps=Math.max(1,Math.ceil(dist/9));
-            for(let j=1;j<=steps;j++){
-              const u=j/steps;
-              const t=prev.t+dt*u;
-              const alpha=Math.max(0,1-(time-t)/.8);
-              if(alpha<=0)continue;
-              const px=prev.p.x+(p.x-prev.p.x)*u,py=prev.p.y+(p.y-prev.p.y)*u;
-              x.fillStyle='rgba('+trailColors[i]+','+(.28+.70*alpha).toFixed(3)+')';
-              x.beginPath();x.arc(px,py,i===15||i===16?3.8:3.3,0,Math.PI*2);x.fill();
-            }
+          if(dt<=0||dt>.45||Math.hypot(p.x-prev.x,p.y-prev.y)>maxJump){
+            if(run.length)runs.push(run);
+            run=[];prev=null;
           }
-        }else{
-          const alpha=Math.max(0,1-(time-frame.t)/.8);
-          x.fillStyle='rgba('+trailColors[i]+','+(.28+.70*alpha).toFixed(3)+')';
-          x.beginPath();x.arc(p.x,p.y,3.5,0,Math.PI*2);x.fill();
         }
-        prev={t:frame.t,p};
+        const smooth=prev?{x:prev.x*.60+p.x*.40,y:prev.y*.60+p.y*.40,t:frame.t}:{x:p.x,y:p.y,t:frame.t};
+        run.push(smooth);prev=smooth;
       }
-    }
-    }else{
-      // Baseline candidate 2: accumulated measured dots and thin connecting lines.
-      for(const i of [13,15,14,16]){
-        const maxJump=Math.max(45,Math.min(w,h)*.30);
-        let prev=null,run=[];const runs=[];
-        for(const frame of pathFrames){
-          const p=frame.pts[i];
-          if(!p){if(run.length)runs.push(run);run=[];prev=null;continue;}
-          if(prev){
-            const dt=frame.t-prev.t;
-            if(dt<=0||dt>.45||Math.hypot(p.x-prev.x,p.y-prev.y)>maxJump){
-              if(run.length)runs.push(run);run=[];prev=null;
-            }
-          }
-          const smooth=prev?{x:prev.x*.60+p.x*.40,y:prev.y*.60+p.y*.40,t:frame.t}:{x:p.x,y:p.y,t:frame.t};
-          run.push(smooth);prev=smooth;
+      if(run.length)runs.push(run);
+      for(const segment of runs){
+        x.save();x.lineCap='round';x.lineJoin='round';
+        x.strokeStyle='rgba('+trailColors[i]+',.88)';
+        x.lineWidth=1.4;
+        if(segment.length>1){
+          x.beginPath();x.moveTo(segment[0].x,segment[0].y);
+          for(let k=1;k<segment.length;k++)x.lineTo(segment[k].x,segment[k].y);
+          x.stroke();
         }
-        if(run.length)runs.push(run);
-        for(const segment of runs){
-          x.save();x.lineCap='round';x.lineJoin='round';
-          x.strokeStyle='rgba('+trailColors[i]+',.88)';x.lineWidth=1.4;
-          if(segment.length>1){
-            x.beginPath();x.moveTo(segment[0].x,segment[0].y);
-            for(let k=1;k<segment.length;k++)x.lineTo(segment[k].x,segment[k].y);
-            x.stroke();
-          }
-          for(const p of segment){
-            x.fillStyle='rgba('+trailColors[i]+',.96)';
-            x.beginPath();x.arc(p.x,p.y,3.1,0,Math.PI*2);x.fill();
-          }
-          x.restore();
+        // Visible dots at observed positions, even when tracking breaks.
+        for(const p of segment){
+          x.fillStyle='rgba('+trailColors[i]+',.96)';
+          x.beginPath();x.arc(p.x,p.y,3.1,0,Math.PI*2);x.fill();
         }
+        x.restore();
       }
     }
     for(const [a,b] of pairs){
@@ -2230,7 +2193,7 @@ $('disconnect').onclick=()=>{
     if(frontJointOn && document.querySelector('.wrap')?.classList.contains('replay-mode')){
       frontJointCanvas?.style.setProperty('display','block','important');
     }
-    byId('frontJointBtn').textContent='관절 '+(frontJointOn?'ON':'OFF');
+    byId('frontJointBtn').textContent='관절보기 '+(frontJointOn?'ON':'OFF');
     byId('frontJointBtn').classList.toggle('jointOn',frontJointOn);
     resetReplayTrails('front');
     if(frontJointOn){const st=byId('result');if(st)st.textContent='관절 분석 시작 · 영상 프레임 확인 중';}
@@ -2241,7 +2204,7 @@ $('disconnect').onclick=()=>{
     if(sideJointOn && document.querySelector('.wrap')?.classList.contains('replay-mode')){
       sideJointCanvas?.style.setProperty('display','block','important');
     }
-    byId('sideJointBtn').textContent='관절 '+(sideJointOn?'ON':'OFF');
+    byId('sideJointBtn').textContent='관절보기 '+(sideJointOn?'ON':'OFF');
     byId('sideJointBtn').classList.toggle('jointOn',sideJointOn);
     resetReplayTrails('side');
     if(!sideJointOn) clearJoint('side');
@@ -3043,13 +3006,14 @@ background:#34493f;color:#fff;font:700 12px Arial,sans-serif;white-space:nowrap}
   if(!bar||document.getElementById('svTrailToggle'))return;
   const btn=document.createElement('button');
   btn.id='svTrailToggle';btn.type='button';
-  btn.textContent='궤적선 OFF';btn.setAttribute('aria-pressed','false');
-  btn.title='관절보기 ON 상태에서 관절 궤적선 표시/숨김';
+  btn.textContent='궤적보기 OFF';btn.setAttribute('aria-pressed','false');
+  btn.title='클럽헤드 궤적 표시 설정 (자동 검출 기능 준비 중)';
+  window.svClubTrailVisible=false;
   btn.addEventListener('click',()=>{
-    const on=btn.getAttribute('aria-pressed')!=='true';
-    btn.setAttribute('aria-pressed',String(on));
-    btn.textContent='궤적선 '+(on?'ON':'OFF');
-    document.dispatchEvent(new CustomEvent('sv-joint-trail-lines',{detail:{visible:on}}));
+    window.svClubTrailVisible=!window.svClubTrailVisible;
+    btn.setAttribute('aria-pressed',String(window.svClubTrailVisible));
+    btn.textContent='궤적보기 '+(window.svClubTrailVisible?'ON':'OFF');
+    document.dispatchEvent(new CustomEvent('sv-club-trail-visibility',{detail:{visible:window.svClubTrailVisible}}));
   });
   const anchor=document.getElementById('frontJointBtn');
   if(anchor&&anchor.parentElement===bar)anchor.insertAdjacentElement('afterend',btn);
