@@ -502,6 +502,19 @@ body>#svFloatingReplay #svAutoReplaySpeed{height:34px!important;min-height:0!imp
  body>#svFloatingReplay button{font-size:10px!important;padding:3px 5px!important}
 }
 </style>
+<style id="svEffectSelectorDock">
+#svFrontEffectSelect{display:none!important}
+body:has(.wrap.replay-mode) #svFrontEffectSelect{
+  display:block!important;position:fixed!important;z-index:3601!important;
+  left:12px!important;bottom:calc(env(safe-area-inset-bottom,0px) + 78px)!important;
+  width:140px!important;max-width:calc(100vw - 24px)!important;
+  height:38px!important;min-height:38px!important;
+  background:#143e2c!important;color:white!important;
+  border:2px solid #88caa0!important;border-radius:8px!important;
+  padding:4px 7px!important;font-size:13px!important;font-weight:700!important;
+  opacity:1!important;visibility:visible!important;pointer-events:auto!important;
+}
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -2253,6 +2266,15 @@ $('disconnect').onclick=()=>{
     });
   }
   svInstallTrailSelector('front','frontJointBtn');
+  // The floating replay toolbar is width-limited and horizontally scrollable.
+  // Put the effect control in a separate visible dock instead of inside it.
+  const frontEffectSelect=byId('frontJointBtn')?.nextElementSibling;
+  if(frontEffectSelect?.tagName==='SELECT'){
+    frontEffectSelect.id='svFrontEffectSelect';
+    frontEffectSelect.title='관절 궤적 효과 1 또는 효과 2';
+    document.body.appendChild(frontEffectSelect);
+  }
+
   svInstallTrailSelector('side','sideJointBtn');
 
   /* 해제 시 측면도 같이 종료 */
