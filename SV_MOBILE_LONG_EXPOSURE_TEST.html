@@ -2021,6 +2021,7 @@ $('disconnect').onclick=()=>{
   const replayTrailLastTime={front:-1,side:-1};
   const replaySkeletonHistory={front:[],side:[]};
   const replaySwingPathHistory={front:[],side:[]};
+  const svTrailMode={front:2,side:2}; // 1=baseline dots, 2=baseline dots + lines
   function resetReplayTrails(which){
     for(const i of [13,14,15,16])replayTrailData[which][i].length=0;
     replayTrailLastTime[which]=-1;
@@ -2085,40 +2086,67 @@ $('disconnect').onclick=()=>{
       pathFrames.push({t:time,pts:{13:pts[13],14:pts[14],15:pts[15],16:pts[16]}});
     }
     while(pathFrames.length&&time-pathFrames[0].t>8)pathFrames.shift();
-    for(const i of [13,15,14,16]){
-      // Replay poses are sampled much more sparsely than the original LIVE
-      // camera stream. Preserve a valid measured path across normal gaps.
-      const maxJump=Math.max(45,Math.min(w,h)*.30);
-      let prev=null,run=[];const runs=[];
-      for(const frame of pathFrames){
-        const p=frame.pts[i];
-        if(!p){if(run.length)runs.push(run);run=[];prev=null;continue;}
-        if(prev){
-          const dt=frame.t-prev.t;
-          if(dt<=0||dt>.45||Math.hypot(p.x-prev.x,p.y-prev.y)>maxJump){
-            if(run.length)runs.push(run);
-            run=[];prev=null;
+    if(svTrailMode[which]===1){
+      // Baseline candidate 1: 0.8s dotted trail with measured-pose interpolation.
+      for(const i of [13,15,14,16]){
+        let prev=null;
+        for(const frame of hist){
+          const p=frame.pts[i];
+          if(!p){prev=null;continue;}
+          if(prev){
+            const dt=frame.t-prev.t;
+            const dist=Math.hypot(p.x-prev.p.x,p.y-prev.p.y);
+            if(dt>0&&dt<=.22&&dist<=Math.max(w,h)*.32){
+              const steps=Math.max(1,Math.ceil(dist/9));
+              for(let j=1;j<=steps;j++){
+                const u=j/steps,t=prev.t+dt*u;
+                const alpha=Math.max(0,1-(time-t)/.8);
+                if(alpha<=0)continue;
+                const px=prev.p.x+(p.x-prev.p.x)*u,py=prev.p.y+(p.y-prev.p.y)*u;
+                x.fillStyle='rgba('+trailColors[i]+','+(.28+.70*alpha).toFixed(3)+')';
+                x.beginPath();x.arc(px,py,i===15||i===16?3.8:3.3,0,Math.PI*2);x.fill();
+              }
+            }
+          }else{
+            const alpha=Math.max(0,1-(time-frame.t)/.8);
+            x.fillStyle='rgba('+trailColors[i]+','+(.28+.70*alpha).toFixed(3)+')';
+            x.beginPath();x.arc(p.x,p.y,3.5,0,Math.PI*2);x.fill();
           }
+          prev={t:frame.t,p};
         }
-        const smooth=prev?{x:prev.x*.60+p.x*.40,y:prev.y*.60+p.y*.40,t:frame.t}:{x:p.x,y:p.y,t:frame.t};
-        run.push(smooth);prev=smooth;
       }
-      if(run.length)runs.push(run);
-      for(const segment of runs){
-        x.save();x.lineCap='round';x.lineJoin='round';
-        x.strokeStyle='rgba('+trailColors[i]+',.88)';
-        x.lineWidth=1.4;
-        if(segment.length>1){
-          x.beginPath();x.moveTo(segment[0].x,segment[0].y);
-          for(let k=1;k<segment.length;k++)x.lineTo(segment[k].x,segment[k].y);
-          x.stroke();
+    }else{
+      // Baseline candidate 2: accumulated measured dots and thin connecting lines.
+      for(const i of [13,15,14,16]){
+        const maxJump=Math.max(45,Math.min(w,h)*.30);
+        let prev=null,run=[];const runs=[];
+        for(const frame of pathFrames){
+          const p=frame.pts[i];
+          if(!p){if(run.length)runs.push(run);run=[];prev=null;continue;}
+          if(prev){
+            const dt=frame.t-prev.t;
+            if(dt<=0||dt>.45||Math.hypot(p.x-prev.x,p.y-prev.y)>maxJump){
+              if(run.length)runs.push(run);run=[];prev=null;
+            }
+          }
+          const smooth=prev?{x:prev.x*.60+p.x*.40,y:prev.y*.60+p.y*.40,t:frame.t}:{x:p.x,y:p.y,t:frame.t};
+          run.push(smooth);prev=smooth;
         }
-        // Visible dots at observed positions, even when tracking breaks.
-        for(const p of segment){
-          x.fillStyle='rgba('+trailColors[i]+',.96)';
-          x.beginPath();x.arc(p.x,p.y,3.1,0,Math.PI*2);x.fill();
+        if(run.length)runs.push(run);
+        for(const segment of runs){
+          x.save();x.lineCap='round';x.lineJoin='round';
+          x.strokeStyle='rgba('+trailColors[i]+',.88)';x.lineWidth=1.4;
+          if(segment.length>1){
+            x.beginPath();x.moveTo(segment[0].x,segment[0].y);
+            for(let k=1;k<segment.length;k++)x.lineTo(segment[k].x,segment[k].y);
+            x.stroke();
+          }
+          for(const p of segment){
+            x.fillStyle='rgba('+trailColors[i]+',.96)';
+            x.beginPath();x.arc(p.x,p.y,3.1,0,Math.PI*2);x.fill();
+          }
+          x.restore();
         }
-        x.restore();
       }
     }
     for(const [a,b] of pairs){
@@ -2209,6 +2237,23 @@ $('disconnect').onclick=()=>{
     resetReplayTrails('side');
     if(!sideJointOn) clearJoint('side');
   };
+
+  function svInstallTrailSelector(which,buttonId){
+    const button=byId(buttonId);if(!button)return;
+    const sel=document.createElement('select');
+    sel.setAttribute('aria-label',which==='front'?'정면 관절 궤적 효과':'측면 관절 궤적 효과');
+    sel.innerHTML='<option value="1">효과 1 · 점</option><option value="2">효과 2 · 점+선</option>';
+    sel.value=String(svTrailMode[which]);
+    sel.style.cssText='max-width:116px;min-height:32px;background:#112c21;color:#f0f8ef;border:1px solid #73987a;border-radius:7px;padding:3px;font-size:12px;';
+    button.insertAdjacentElement('afterend',sel);
+    sel.addEventListener('change',()=>{
+      svTrailMode[which]=Number(sel.value);
+      resetReplayTrails(which);
+      clearJoint(which);
+    });
+  }
+  svInstallTrailSelector('front','frontJointBtn');
+  svInstallTrailSelector('side','sideJointBtn');
 
   /* 해제 시 측면도 같이 종료 */
   byId('disconnect')?.addEventListener('click',()=>{
