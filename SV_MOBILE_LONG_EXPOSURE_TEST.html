@@ -2077,55 +2077,39 @@ $('disconnect').onclick=()=>{
         x.lineWidth=1;x.beginPath();x.moveTo(p.x,p.y);x.lineTo(q.x,q.y);x.stroke();
       }
     }
-    // Reference-style swing arc: retain the measured wrist/elbow path for the
-    // current replay, while the white full-body ghost remains 0.8 seconds.
+    // Restore the verified red/yellow-era motion smoothing and jump rejection.
+    // Keep current four-color convention; replay path is independent per joint.
     const trailColors={13:'255,165,0',15:'255,72,72',14:'48,205,94',16:'50,145,255'};
     const pathFrames=replaySwingPathHistory[which];
-    if(!pathFrames.length||time-pathFrames[pathFrames.length-1].t>.008){
+    if(!pathFrames.length||Math.abs(time-pathFrames[pathFrames.length-1].t)>.008){
       pathFrames.push({t:time,pts:{13:pts[13],14:pts[14],15:pts[15],16:pts[16]}});
     }
-    // Retain up to one replay swing (max 8s); seeking/replay restart clears it.
     while(pathFrames.length&&time-pathFrames[0].t>8)pathFrames.shift();
     for(const i of [13,15,14,16]){
-      const runs=[];let run=[];
+      const maxJump=Math.max(18,Math.min(w,h)*.11);
+      let prev=null,run=[];
+      const runs=[];
       for(const frame of pathFrames){
         const p=frame.pts[i];
-        if(!p){if(run.length>1)runs.push(run);run=[];continue;}
-        const prev=run[run.length-1];
+        if(!p){if(run.length>1)runs.push(run);run=[];prev=null;continue;}
         if(prev){
-          const dt=frame.t-prev.t,dist=Math.hypot(p.x-prev.p.x,p.y-prev.p.y);
-          if(dt<=0||dt>.22||dist>Math.max(w,h)*.22){
-            if(run.length>1)runs.push(run);run=[];
-          }else if(dist<1.2)continue; // skip stationary jitter
+          const dt=frame.t-prev.t;
+          if(dt<=0||dt>.22||Math.hypot(p.x-prev.x,p.y-prev.y)>maxJump){
+            if(run.length>1)runs.push(run);
+            run=[];prev=null;
+          }
         }
-        run.push({x:p.x,y:p.y,t:frame.t});
+        const smooth=prev?{x:prev.x*.60+p.x*.40,y:prev.y*.60+p.y*.40,t:frame.t}:{x:p.x,y:p.y,t:frame.t};
+        run.push(smooth);prev=smooth;
       }
       if(run.length>1)runs.push(run);
       for(const segment of runs){
-        // Smooth curve through tracked positions, no invented off-path arc.
-        x.strokeStyle='rgba('+trailColors[i]+',.65)';
-        x.lineWidth=1.25;x.beginPath();x.moveTo(segment[0].x,segment[0].y);
-        for(let k=1;k<segment.length-1;k++){
-          const p=segment[k],q=segment[k+1];
-          x.quadraticCurveTo(p.x,p.y,(p.x+q.x)/2,(p.y+q.y)/2);
-        }
-        const last=segment[segment.length-1];
-        x.lineTo(last.x,last.y);x.stroke();
-        // Evenly spaced bright dots along the sampled path.
-        let carry=0;
-        for(let k=1;k<segment.length;k++){
-          const a=segment[k-1],b=segment[k];
-          const dist=Math.hypot(b.x-a.x,b.y-a.y);
-          if(dist<.001)continue;
-          let at=9-carry;
-          while(at<=dist){
-            const u=at/dist;
-            x.fillStyle='rgba('+trailColors[i]+',.96)';
-            x.beginPath();x.arc(a.x+(b.x-a.x)*u,a.y+(b.y-a.y)*u,i>=15?3.7:3.2,0,Math.PI*2);x.fill();
-            at+=9;
-          }
-          carry=(carry+dist)%9;
-        }
+        x.save();x.lineCap='round';x.lineJoin='round';
+        x.strokeStyle='rgba('+trailColors[i]+',.90)';
+        x.lineWidth=i>=15?2.8:2.3;
+        x.beginPath();x.moveTo(segment[0].x,segment[0].y);
+        for(let k=1;k<segment.length;k++)x.lineTo(segment[k].x,segment[k].y);
+        x.stroke();x.restore();
       }
     }
     for(const [a,b] of pairs){
