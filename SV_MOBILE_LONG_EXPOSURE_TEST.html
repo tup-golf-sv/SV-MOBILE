@@ -916,40 +916,13 @@ function drawSkeleton(lm){
     ctx.beginPath();ctx.arc(p.x,p.y,4.2,0,Math.PI*2);ctx.fill();
   }
   ctx.restore();
-  const specs=[
-    {i:13,color:'255,72,72',alpha:.78,width:2.3},
-    {i:14,color:'50,145,255',alpha:.78,width:2.3},
-    {i:15,color:'255,72,72',alpha:.98,width:2.8},
-    {i:16,color:'50,145,255',alpha:.98,width:2.8}
-  ];
-  for(const spec of specs){
-    const p=lm[spec.i],history=svJointTrailHistory[spec.i];
-    const valid=p&&Number.isFinite(p.x)&&Number.isFinite(p.y)&&(p.visibility??1)>=.55;
-    if(valid){
-      const pt=displayPoint(p);
-      const last=history.length?history[history.length-1]:null;
-      // A large frame-to-frame jump is a tracking discontinuity, not a swing arc.
-      const maxJump=Math.max(18,Math.min(view.width,view.height)*.11);
-      if(last?.valid&&Math.hypot(pt.x-last.x,pt.y-last.y)>maxJump)history.push({valid:false});
-      const prev=history.length?history[history.length-1]:null;
-      const smooth=prev?.valid?{x:prev.x*.60+pt.x*.40,y:prev.y*.60+pt.y*.40}:pt;
-      history.push({...smooth,valid:true});
-    }else history.push({valid:false});
-    if(history.length>svJointTrailLimit)history.splice(0,history.length-svJointTrailLimit);
-    ctx.save();ctx.lineWidth=spec.width;ctx.strokeStyle='rgba('+spec.color+','+spec.alpha+')';
-    ctx.lineCap='round';ctx.lineJoin='round';
-    ctx.beginPath();let connected=false;
-    for(const pt of history){
-      if(!pt.valid){connected=false;continue;}
-      if(!connected){ctx.moveTo(pt.x,pt.y);connected=true;}
-      else ctx.lineTo(pt.x,pt.y);
-    }
-    ctx.stroke();
-    if(valid&&history.length&&history[history.length-1].valid){
-      const pt=history[history.length-1];
-      ctx.beginPath();ctx.arc(pt.x,pt.y,spec.i>=15?5.5:5,0,Math.PI*2);
-      ctx.fillStyle='rgba('+spec.color+','+(spec.i>=15?1:.75)+')';ctx.fill();
-    }
+  // R7 correction: draw only the current wrist/elbow markers.
+  // Legacy long-running point paths were overlaying the 1.5s full-body exposure.
+  for(const [i,color] of [[13,'255,72,72'],[15,'255,72,72'],[14,'50,145,255'],[16,'50,145,255']]){
+    const p=points[i];if(!p)continue;
+    ctx.save();
+    ctx.fillStyle='rgba('+color+',1)';
+    ctx.beginPath();ctx.arc(p.x,p.y,i>=15?5.5:5,0,Math.PI*2);ctx.fill();
     ctx.restore();
   }
 }
