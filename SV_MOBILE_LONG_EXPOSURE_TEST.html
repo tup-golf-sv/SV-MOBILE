@@ -584,8 +584,93 @@ const replay=$('replay'), replayCanvas=$('replayCanvas'), rctx=replayCanvas.getC
 
 let stream=null, pose=null, armed=false, processing=false, raf=null;
 let recorder=null, chunks=[], recording=false;
-let svSetupRecordStart=0,svStopTimer=null;
-const SV_SETUP_MAX_MS=10000; // safety limit for a READY without a swing
+let svStopTimer=null;
+const SV_PREROLL_MS=1500,SV_CAPTURE_FPS=20,SV_FRAME_STEP=1000/SV_CAPTURE_FPS;
+const svRolling={front:[],side:[]};
+let svCaptureInterval=null,svCaptureActive=false,svSideLive=null;
+function svSampleFrame(){
+  if(!armed||!stream)return;
+  const now=performance.now();
+  const sources=[['front',raw],['side',svSideLive]];
+  for(const [key,v] of sources){
+    if(!v||v.readyState<2||!v.videoWidth||!v.videoHeight)continue;
+    const q=svRolling[key];
+    const last=q[q.length-1];
+    if(last&&now-last.t<SV_FRAME_STEP*.8)continue;
+    const c=document.createElement('canvas');
+    const scale=Math.min(1,640/Math.max(v.videoWidth,v.videoHeight));
+    c.width=Math.max(1,Math.round(v.videoWidth*scale));
+    c.height=Math.max(1,Math.round(v.videoHeight*scale));
+    c.getContext('2d',{alpha:false}).drawImage(v,0,0,c.width,c.height);
+    q.push({t:now,frame:c});
+    if(!svCaptureActive)while(q.length&&q[0].t<now-SV_PREROLL_MS)q.shift();
+  }
+}
+function svStartRolling(){
+  if(svCaptureInterval)return;
+  svCaptureInterval=setInterval(svSampleFrame,SV_FRAME_STEP);
+}
+async function svEncodeFrames(frames){
+  if(!frames.length)return null;
+  const canvas=document.createElement('canvas');
+  canvas.width=frames[0].frame.width;canvas.height=frames[0].frame.height;
+  const cx=canvas.getContext('2d',{alpha:false});
+  if(!canvas.captureStream||typeof MediaRecorder==='undefined')return null;
+  const videoStream=canvas.captureStream(SV_CAPTURE_FPS);
+  const formats=['video/webm;codecs=vp8','video/webm','video/mp4'];
+  const mime=formats.find(t=>MediaRecorder.isTypeSupported(t));
+  const rec=new MediaRecorder(videoStream,mime?{mimeType:mime}:undefined);
+  const pieces=[];
+  rec.ondataavailable=e=>{if(e.data.size)pieces.push(e.data)};
+  const stopped=new Promise(resolve=>rec.onstop=()=>resolve(new Blob(pieces,{type:rec.mimeType||'video/webm'})));
+  rec.start(100);
+  const tick=1000/SV_CAPTURE_FPS;
+  for(let i=0;i<frames.length;i++){
+    cx.drawImage(frames[i].frame,0,0,canvas.width,canvas.height);
+    await new Promise(r=>setTimeout(r,tick));
+  }
+  rec.stop();
+  const blob=await stopped;
+  videoStream.getTracks().forEach(t=>t.stop());
+  return blob;
+}
+function svLoadCapturedFront(blob){
+  if(!blob)return;
+  latestReplayBlob=blob;
+  if(replay.src)URL.revokeObjectURL(replay.src);
+  replay.src=URL.createObjectURL(blob);replay.loop=true;replay.muted=true;replay.load();
+  replay.onloadedmetadata=()=>{
+    if(raw.videoHeight>raw.videoWidth&&replay.videoHeight>replay.videoWidth){
+      window.svFrontRotation=0;
+      const b=document.getElementById('frontRotateBtn');if(b)b.textContent='영상회전 0°';
+    }
+    ['replayPlay','replayPause','sendA','sendB','frontJointBtn','frameBack','frameNext','speedMenuBtn','frontRotateBtn','replaySeek'].forEach(id=>{const el=$(id);if(el)el.disabled=false});
+    replay.playbackRate=window.svGetAutoReplaySpeed?window.svGetAutoReplaySpeed():0.5;
+    $('timeTotal').textContent=replay.duration.toFixed(2);
+    replay.currentTime=0;replay.play().catch(()=>{});
+    if(typeof window.svShowReplay==='function')window.svShowReplay();
+    $('result').textContent='스윙 전 1.5초 + 감지 후 3.2초';
+  };
+}
+function svStartPreRollCapture(){
+  if(svCaptureActive)return;
+  svCaptureActive=true;
+  const detectedAt=performance.now();
+  for(const key of ['front','side']){
+    const q=svRolling[key];
+    while(q.length&&q[0].t<detectedAt-SV_PREROLL_MS)q.shift();
+  }
+  setTimeout(async()=>{
+    const front=svRolling.front.slice(),side=svRolling.side.slice();
+    svRolling.front=[];svRolling.side=[];
+    svCaptureActive=false;
+    try{
+      const [frontBlob,sideBlob]=await Promise.all([svEncodeFrames(front),svEncodeFrames(side)]);
+      svLoadCapturedFront(frontBlob);
+      if(sideBlob&&typeof window.svLoadCapturedSide==='function')window.svLoadCapturedSide(sideBlob);
+    }catch(e){console.error('R6 capture',e);$('status').textContent='R6 녹화 인코딩 실패: '+(e.message||e);}
+  },SWING_CAPTURE_MS);
+}
 let latestReplayBlob=null;
 let ready=false, readyAt=0, stableSince=0, swingStarted=false, swingStartAt=0, addressLocked=false;
 let lastPose=null, lastPoseTime=0, lastWristSpeed=0;
@@ -843,7 +928,6 @@ function drawSkeleton(lm){
 
 function startRecording(){
   if(recording || !stream) return;
-  svSetupRecordStart=performance.now();
   chunks=[];
   // Choose only a recording format actually supported by this browser.
   // Safari/iOS commonly supports MP4, while Chromium browsers may prefer WebM.
@@ -888,14 +972,6 @@ function startRecording(){
   };
   recorder.start(100);
   recording=true;
-  const thisRecorder=recorder;
-  setTimeout(()=>{
-    if(thisRecorder===recorder && thisRecorder.state==='recording' && !swingStarted && !svStopTimer){
-      thisRecorder.stop();
-      if(typeof window.stopSideRecording==='function')window.stopSideRecording();
-      if(ready&&addressLocked){ready=false;addressLocked=false;}
-    }
-  },SV_SETUP_MAX_MS);
   // V12.1: 정면 관절감지 트리거와 같은 순간에 측면도 녹화
   if(typeof window.startSideRecording==='function'){
     try{ window.startSideRecording(); }catch(e){ console.warn('side record start',e); }
@@ -1145,8 +1221,7 @@ async function onResults(results){
         svReadyTrace.readyCount++;svReadyTrace.lastReason='READY 성공';
         addressLocked=true;
         ready=true;readyAt=now;stableSince=0;svResetAddressCandidate();
-        // Capture the setup from READY, before the swing detector fires.
-        if(!recording)startRecording();
+        // READY is unlimited; rolling buffer retains only the latest 1.5 seconds.
         $('addressState').textContent='LOCK';
         $('overlay').style.display='flex';
         $('state').className='state ready';$('state').textContent='READY';
@@ -1200,8 +1275,7 @@ async function onResults(results){
       $('state').className='state impact';$('state').textContent='SWING 감지';
       $('status').textContent='골프 스윙 패턴 확인 · 영상 저장 중';
 
-      if(!recording)startRecording();
-      stopRecordingSoon();
+      svStartPreRollCapture();
       cooldown=true;
 
       setTimeout(()=>{
@@ -1340,6 +1414,7 @@ $('connect').onclick=async()=>{
       minTrackingConfidence:0.45
     });
     pose.onResults(onResults);
+    svStartRolling();
 
     $('connect').disabled=true;$('arm').disabled=false;$('disconnect').disabled=false;
     $('status').textContent='카메라 영상 연결됨 · 90° 정상화 관절감지 준비 완료';
@@ -1357,7 +1432,7 @@ $('connect').onclick=async()=>{
 };
 
 $('arm').onclick=()=>{
-  armed=!armed;ready=false;addressLocked=false;stableSince=0;svResetAddressCandidate();swingStarted=false;lastPose=null;lastPoseTime=0;
+  armed=!armed;if(!armed){svRolling.front=[];svRolling.side=[];}ready=false;addressLocked=false;stableSince=0;svResetAddressCandidate();swingStarted=false;lastPose=null;lastPoseTime=0;
   $('arm').textContent=armed?'스윙감지 OFF':'스윙감지 ON';
   $('state').className='state wait';
   $('addressState').textContent='OFF';$('state').textContent=armed?'사람/어드레스 대기':'대기';
@@ -1743,6 +1818,8 @@ $('disconnect').onclick=()=>{
         return false;
       }
 
+      if(!svSideLive){svSideLive=document.createElement('video');svSideLive.muted=true;svSideLive.playsInline=true;}
+      svSideLive.srcObject=sideStream;await svSideLive.play();
       wrap.classList.add('dual-camera-active');
       byId('sideResult').textContent='CAM2 연결 확인 · 정면/측면 50:50 자동 전환';
       return true;
@@ -1772,6 +1849,19 @@ $('disconnect').onclick=()=>{
     if(wrap) wrap.classList.remove('dual-camera-active');
   },true);
 
+  window.svLoadCapturedSide=function(blob){
+    latestSideBlob=blob;
+    if(sideReplay.src)URL.revokeObjectURL(sideReplay.src);
+    sideReplay.src=URL.createObjectURL(blob);sideReplay.loop=true;sideReplay.muted=true;sideReplay.load();
+    sideReplay.onloadedmetadata=()=>{
+      ['sidePlay','sidePause','sideSendA','sideSendB','sideJointBtn','sideFrameBack','sideFrameNext','sideSpeed','sideRotateBtn','sideSeek'].forEach(id=>{const el=byId(id);if(el)el.disabled=false});
+      byId('sideTimeTotal').textContent=(sideReplay.duration||0).toFixed(2);
+      sideReplay.currentTime=0;
+      sideReplay.playbackRate=window.svGetAutoReplaySpeed?window.svGetAutoReplaySpeed():0.5;
+      sideReplay.play().catch(()=>{});
+      byId('sideResult').textContent='측면 스윙 전 1.5초 + 감지 후 3.2초';
+    };
+  };
   /* ---------- 정면 트리거와 동시에 측면 녹화 ---------- */
   window.stopSideRecording=function(){
     if(sideRecorder&&sideRecorder.state==='recording')sideRecorder.stop();
