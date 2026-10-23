@@ -584,6 +584,8 @@ const replay=$('replay'), replayCanvas=$('replayCanvas'), rctx=replayCanvas.getC
 
 let stream=null, pose=null, armed=false, processing=false, raf=null;
 let recorder=null, chunks=[], recording=false;
+let svSetupRecordStart=0,svStopTimer=null;
+const SV_SETUP_MAX_MS=10000; // safety limit for a READY without a swing
 let latestReplayBlob=null;
 let ready=false, readyAt=0, stableSince=0, swingStarted=false, swingStartAt=0, addressLocked=false;
 let lastPose=null, lastPoseTime=0, lastWristSpeed=0;
@@ -841,6 +843,7 @@ function drawSkeleton(lm){
 
 function startRecording(){
   if(recording || !stream) return;
+  svSetupRecordStart=performance.now();
   chunks=[];
   // Choose only a recording format actually supported by this browser.
   // Safari/iOS commonly supports MP4, while Chromium browsers may prefer WebM.
@@ -885,6 +888,14 @@ function startRecording(){
   };
   recorder.start(100);
   recording=true;
+  const thisRecorder=recorder;
+  setTimeout(()=>{
+    if(thisRecorder===recorder && thisRecorder.state==='recording' && !swingStarted && !svStopTimer){
+      thisRecorder.stop();
+      if(typeof window.stopSideRecording==='function')window.stopSideRecording();
+      if(ready&&addressLocked){ready=false;addressLocked=false;}
+    }
+  },SV_SETUP_MAX_MS);
   // V12.1: 정면 관절감지 트리거와 같은 순간에 측면도 녹화
   if(typeof window.startSideRecording==='function'){
     try{ window.startSideRecording(); }catch(e){ console.warn('side record start',e); }
@@ -892,7 +903,12 @@ function startRecording(){
 }
 
 function stopRecordingSoon(){
-  setTimeout(()=>{if(recorder&&recorder.state==='recording') recorder.stop()},SWING_CAPTURE_MS);
+  if(svStopTimer)clearTimeout(svStopTimer);
+  svStopTimer=setTimeout(()=>{
+    if(recorder&&recorder.state==='recording')recorder.stop();
+    if(typeof window.stopSideRecording==='function')window.stopSideRecording();
+    svStopTimer=null;
+  },SWING_CAPTURE_MS);
 }
 
 // ADDRESS diagnostic display only; scoring and READY thresholds are unchanged.
@@ -1129,6 +1145,8 @@ async function onResults(results){
         svReadyTrace.readyCount++;svReadyTrace.lastReason='READY 성공';
         addressLocked=true;
         ready=true;readyAt=now;stableSince=0;svResetAddressCandidate();
+        // Capture the setup from READY, before the swing detector fires.
+        if(!recording)startRecording();
         $('addressState').textContent='LOCK';
         $('overlay').style.display='flex';
         $('state').className='state ready';$('state').textContent='READY';
@@ -1182,7 +1200,7 @@ async function onResults(results){
       $('state').className='state impact';$('state').textContent='SWING 감지';
       $('status').textContent='골프 스윙 패턴 확인 · 영상 저장 중';
 
-      startRecording();
+      if(!recording)startRecording();
       stopRecordingSoon();
       cooldown=true;
 
@@ -1755,6 +1773,9 @@ $('disconnect').onclick=()=>{
   },true);
 
   /* ---------- 정면 트리거와 동시에 측면 녹화 ---------- */
+  window.stopSideRecording=function(){
+    if(sideRecorder&&sideRecorder.state==='recording')sideRecorder.stop();
+  };
   window.startSideRecording=function(){
     if(!sideStream || sideRecorder?.state==='recording') return;
     sideChunks=[];
@@ -1782,9 +1803,7 @@ $('disconnect').onclick=()=>{
       };
     };
     sideRecorder.start(100);
-    setTimeout(()=>{
-      if(sideRecorder && sideRecorder.state==='recording') sideRecorder.stop();
-    },3200);
+    // The front camera ends both recordings after the detected swing.
   };
 
   /* ---------- 측면 리플레이: cover + 원본비율 유지 ---------- */
