@@ -489,6 +489,18 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important}
 }
 </style>
 
+<style id="svReplayTouchSizeFix">
+/* Replay toolbar touch targets: visual styling and event handlers unchanged. */
+body>#svFloatingReplay{gap:7px!important;padding:7px!important;scroll-behavior:smooth!important;justify-content:flex-start!important}
+body>#svFloatingReplay button{height:48px!important;min-height:48px!important;padding:8px 12px!important;font-size:13px!important;touch-action:manipulation!important}
+body>#svFloatingReplay #replayPlay,body>#svFloatingReplay #replayPause{height:54px!important;min-height:54px!important;min-width:78px!important;font-size:15px!important;font-weight:800!important}
+body>#svFloatingReplay #frameBack,body>#svFloatingReplay #frameNext{min-width:94px!important}
+body>#svFloatingReplay #svAutoReplaySpeed{height:44px!important;min-height:44px!important;font-size:14px!important}
+@media(max-width:700px){
+ body>#svFloatingReplay button{height:48px!important;min-height:48px!important;font-size:13px!important;padding:8px 11px!important}
+ body>#svFloatingReplay #replayPlay,body>#svFloatingReplay #replayPause{height:54px!important;min-height:54px!important;font-size:15px!important}
+}
+</style>
 </head>
 <body>
 <div class="wrap">
