@@ -2088,6 +2088,14 @@ $('disconnect').onclick=()=>{
           const dist=Math.hypot(p.x-prev.p.x,p.y-prev.p.y);
           // Do not connect across missing/large temporal gaps or implausible jumps.
           if(dt>0&&dt<=.22&&dist<=Math.max(w,h)*.32){
+            // Thin, same-color path underneath the existing colored dots.
+            // Connect only consecutive valid measured poses; keep the 0.8s fade.
+            const segmentAlpha=Math.max(0,1-(time-(prev.t+dt*.5))/.8);
+            if(segmentAlpha>0){
+              x.strokeStyle='rgba('+trailColors[i]+','+(.22+.55*segmentAlpha).toFixed(3)+')';
+              x.lineWidth=1.15;
+              x.beginPath();x.moveTo(prev.p.x,prev.p.y);x.lineTo(p.x,p.y);x.stroke();
+            }
             const steps=Math.max(1,Math.ceil(dist/9));
             for(let j=1;j<=steps;j++){
               const u=j/steps;
