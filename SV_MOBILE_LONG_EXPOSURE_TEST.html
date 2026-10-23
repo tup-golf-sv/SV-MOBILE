@@ -1921,8 +1921,24 @@ $('disconnect').onclick=()=>{
     const inputH=(which==='front'?frontJointInput:sideJointInput).height;
     const scale=Math.min(w/inputW,h/inputH);
     const imageX=(w-inputW*scale)/2,imageY=(h-inputH*scale)/2;
+    // Draw the rest of the detected joints without obscuring the swing video.
+    const project=p=>({x:imageX+p.x*inputW*scale,y:imageY+p.y*inputH*scale});
+    const pairs=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
+    x.save();x.lineWidth=1;x.strokeStyle='rgba(255,255,255,.48)';
+    for(const [a,b] of pairs){
+      const p=lm[a],q=lm[b];
+      if(!p||!q||(p.visibility??1)<.45||(q.visibility??1)<.45)continue;
+      const v=project(p),u=project(q);
+      x.beginPath();x.moveTo(v.x,v.y);x.lineTo(u.x,u.y);x.stroke();
+    }
+    x.fillStyle='rgba(255,255,255,.7)';
+    for(const i of [11,12,23,24,25,26,27,28]){
+      const p=lm[i];if(!p||(p.visibility??1)<.45)continue;
+      const v=project(p);x.beginPath();x.arc(v.x,v.y,2.2,0,Math.PI*2);x.fill();
+    }
+    x.restore();
     const specs=[
-      {i:13,rgb:'255,218,38',alpha:.38,width:1.1,radius:2.6},
+      {i:13,rgb:'255,218,38',alpha:.52,width:1.2,radius:2.6},
       {i:14,rgb:'255,218,38',alpha:.38,width:1.1,radius:2.6},
       {i:15,rgb:'255,55,55',alpha:.95,width:1.5,radius:3},
       {i:16,rgb:'255,55,55',alpha:.95,width:1.5,radius:3}
@@ -1932,10 +1948,17 @@ $('disconnect').onclick=()=>{
       const valid=p&&Number.isFinite(p.x)&&Number.isFinite(p.y)&&(p.visibility??1)>=.55;
       // Skip duplicate video timestamps, including pause frames.
       if(history.length===0||Math.abs(time-history[history.length-1].t)>.008){
-        history.push(valid?{x:imageX+p.x*inputW*scale,y:imageY+p.y*inputH*scale,t:time,valid:true}:{t:time,valid:false});
-        if(history.length>1200)history.shift();
+        if(valid){
+          const point=project(p),last=history.length?history[history.length-1]:null;
+          const maxJump=Math.max(18,Math.min(w,h)*.11);
+          if(last?.valid&&Math.hypot(point.x-last.x,point.y-last.y)>maxJump)history.push({t:time,valid:false});
+          const prev=history.length?history[history.length-1]:null;
+          const smooth=prev?.valid?{x:prev.x*.60+point.x*.40,y:prev.y*.60+point.y*.40}:point;
+          history.push({...smooth,t:time,valid:true});
+        }else history.push({t:time,valid:false});
+        if(history.length>1200)history.splice(0,history.length-1200);
       }
-      x.save();x.lineWidth=spec.width;x.strokeStyle='rgba('+spec.rgb+','+spec.alpha+')';
+      x.save();x.lineWidth=spec.width;x.lineCap='round';x.lineJoin='round';x.strokeStyle='rgba('+spec.rgb+','+spec.alpha+')';
       x.beginPath();let started=false;
       for(const point of history){
         if(!point.valid){started=false;continue;}
