@@ -768,10 +768,15 @@ function svPoseDisplayPoint(p){
   return {x:centerX+dx*Math.cos(rad)-dy*Math.sin(rad),
           y:centerY+dx*Math.sin(rad)+dy*Math.cos(rad)};
 }
+// Experimental LIVE overlay: measured MediaPipe wrist/elbow tracks only.
+// Never interpolate across missing or low-confidence observations.
+const svJointTrailHistory={13:[],14:[],15:[],16:[]};
+const svJointTrailLimit=900;
+function svResetJointTrails(){
+  for(const k of [13,14,15,16])svJointTrailHistory[k].length=0;
+}
 function drawSkeleton(lm){
   if(!lm)return;
-  // DISPLAY ONLY: scale the skeleton 120% about the detected hip midpoint.
-  // Keep the original video, MediaPipe coordinates and ADDRESS/SHOT logic intact.
   const leftHip=lm[23],rightHip=lm[24];
   const hipCenter=(leftHip&&rightHip)
     ? svPoseDisplayPoint({x:(leftHip.x+rightHip.x)/2,y:(leftHip.y+rightHip.y)/2})
@@ -781,19 +786,37 @@ function drawSkeleton(lm){
     return {x:hipCenter.x+(pt.x-hipCenter.x)*1.2,
             y:hipCenter.y+(pt.y-hipCenter.y)*1.2};
   };
-  const pairs=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
-  ctx.lineWidth=3;ctx.strokeStyle='rgba(255,255,255,.9)';
-  for(const [a,b] of pairs){
-    const p=lm[a],q=lm[b];
-    if(!p||!q||p.visibility<.35||q.visibility<.35)continue;
-    const aPos=displayPoint(p),bPos=displayPoint(q);
-    ctx.beginPath();ctx.moveTo(aPos.x,aPos.y);ctx.lineTo(bPos.x,bPos.y);ctx.stroke();
-  }
-  ctx.fillStyle='white';
-  for(const i of [11,12,13,14,15,16,23,24,25,26,27,28]){
-    const p=lm[i];if(!p||p.visibility<.35)continue;
-    const pt=displayPoint(p);
-    ctx.beginPath();ctx.arc(pt.x,pt.y,5,0,Math.PI*2);ctx.fill();
+  const specs=[
+    {i:13,color:'255,218,38',alpha:.40,width:1.1},
+    {i:14,color:'255,218,38',alpha:.40,width:1.1},
+    {i:15,color:'255,55,55',alpha:.92,width:1.5},
+    {i:16,color:'255,55,55',alpha:.92,width:1.5}
+  ];
+  for(const spec of specs){
+    const p=lm[spec.i],history=svJointTrailHistory[spec.i];
+    const valid=p&&Number.isFinite(p.x)&&Number.isFinite(p.y)&&(p.visibility??1)>=.55;
+    if(valid){
+      const point=displayPoint(p);
+      if(Number.isFinite(point.x)&&Number.isFinite(point.y)){
+        history.push({x:point.x,y:point.y,valid:true});
+        if(history.length>svJointTrailLimit)history.shift();
+      }else history.push({valid:false});
+    }else history.push({valid:false});
+    if(history.length>svJointTrailLimit)history.shift();
+    ctx.save();ctx.lineWidth=spec.width;ctx.strokeStyle='rgba('+spec.color+','+spec.alpha+')';
+    ctx.beginPath();let connected=false;
+    for(const pt of history){
+      if(!pt.valid){connected=false;continue;}
+      if(!connected){ctx.moveTo(pt.x,pt.y);connected=true;}
+      else ctx.lineTo(pt.x,pt.y);
+    }
+    ctx.stroke();
+    if(valid&&history.length&&history[history.length-1].valid){
+      const pt=history[history.length-1];
+      ctx.beginPath();ctx.arc(pt.x,pt.y,spec.i>=15?3:2.6,0,Math.PI*2);
+      ctx.fillStyle='rgba('+spec.color+','+(spec.i>=15?1:.5)+')';ctx.fill();
+    }
+    ctx.restore();
   }
 }
 
