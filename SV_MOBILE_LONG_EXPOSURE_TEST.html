@@ -2004,7 +2004,14 @@ $('disconnect').onclick=()=>{
       modelComplexity:1,smoothLandmarks:true,enableSegmentation:false,
       minDetectionConfidence:0.45,minTrackingConfidence:0.45
     });
-    p.onResults(res=>drawReplayJoints(which,res.poseLandmarks||null));
+    p.onResults(res=>{
+      const landmarks=res.poseLandmarks||null;
+      const status=byId(which==='front'?'result':'sideResult');
+      if(status && (which==='front'?frontJointOn:sideJointOn)){
+        status.textContent=landmarks?'관절 분석: 좌표 '+landmarks.length+'개 수신':'관절 분석: 인체 좌표 미검출';
+      }
+      drawReplayJoints(which,landmarks);
+    });
     if(isFront) frontReplayPose=p; else sideReplayPose=p;
     return p;
   }
@@ -2114,11 +2121,11 @@ $('disconnect').onclick=()=>{
     const now=performance.now();
     if(frontJointOn && !frontPoseBusy && now-frontLastPoseAt>90){
       frontPoseBusy=true;frontLastPoseAt=now;
-      try{await processReplayPose('front');}catch(e){}finally{frontPoseBusy=false;}
+      try{await processReplayPose('front');}catch(e){const st=byId('result');if(st)st.textContent='관절 분석 오류: '+(e.message||String(e));console.error('front replay pose',e);}finally{frontPoseBusy=false;}
     }
     if(sideJointOn && !sidePoseBusy && now-sideLastPoseAt>90){
       sidePoseBusy=true;sideLastPoseAt=now;
-      try{await processReplayPose('side');}catch(e){}finally{sidePoseBusy=false;}
+      try{await processReplayPose('side');}catch(e){const st=byId('sideResult');if(st)st.textContent='측면 관절 분석 오류: '+(e.message||String(e));console.error('side replay pose',e);}finally{sidePoseBusy=false;}
     }
     requestAnimationFrame(jointLoop);
   }
@@ -2143,6 +2150,7 @@ $('disconnect').onclick=()=>{
     byId('frontJointBtn').textContent='관절보기 '+(frontJointOn?'ON':'OFF');
     byId('frontJointBtn').classList.toggle('jointOn',frontJointOn);
     resetReplayTrails('front');
+    if(frontJointOn){const st=byId('result');if(st)st.textContent='관절 분석 시작 · 영상 프레임 확인 중';}
     if(!frontJointOn) clearJoint('front');
   };
   byId('sideJointBtn').onclick=()=>{
