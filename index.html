@@ -1885,8 +1885,11 @@ $('disconnect').onclick=()=>{
     if(c.width!==w||c.height!==h){c.width=w;c.height=h;resetReplayTrails(which);}
     const x=c.getContext('2d');
     x.clearRect(0,0,w,h);
-    if(!lm)return;
     const time=video.currentTime||0;
+    if(!lm){
+      for(const i of [13,14,15,16])replayTrailData[which][i].push({t:time,valid:false});
+      return;
+    }
     if(replayTrailLastTime[which]>=0 && time<replayTrailLastTime[which]-.06)resetReplayTrails(which);
     replayTrailLastTime[which]=time;
     const specs=[
@@ -1976,12 +1979,14 @@ $('disconnect').onclick=()=>{
     frontJointOn=!frontJointOn;
     byId('frontJointBtn').textContent='관절보기 '+(frontJointOn?'ON':'OFF');
     byId('frontJointBtn').classList.toggle('jointOn',frontJointOn);
+    resetReplayTrails('front');
     if(!frontJointOn) clearJoint('front');
   };
   byId('sideJointBtn').onclick=()=>{
     sideJointOn=!sideJointOn;
     byId('sideJointBtn').textContent='관절보기 '+(sideJointOn?'ON':'OFF');
     byId('sideJointBtn').classList.toggle('jointOn',sideJointOn);
+    resetReplayTrails('side');
     if(!sideJointOn) clearJoint('side');
   };
 
