@@ -2077,36 +2077,29 @@ $('disconnect').onclick=()=>{
         x.lineWidth=1;x.beginPath();x.moveTo(p.x,p.y);x.lineTo(q.x,q.y);x.stroke();
       }
     }
-    // Draw a clearly visible dotted trace between consecutive *measured* poses.
-    // Interpolation only fills the visual gaps between adjacent valid samples.
+    // Scatter exposure: particles are anchored to observed pose samples only.
+    // Deterministic small offsets avoid changing position when a frame redraws.
     const trailColors={13:'255,165,0',15:'255,72,72',14:'48,205,94',16:'50,145,255'};
     for(const i of [13,15,14,16]){
-      let prev=null;
+      let sample=0;
       for(const frame of hist){
         const p=frame.pts[i];
-        if(!p){prev=null;continue;}
-        if(prev){
-          const dt=frame.t-prev.t;
-          const dist=Math.hypot(p.x-prev.p.x,p.y-prev.p.y);
-          // Do not connect across missing/large temporal gaps or implausible jumps.
-          if(dt>0&&dt<=.22&&dist<=Math.max(w,h)*.32){
-            const steps=Math.max(1,Math.ceil(dist/9));
-            for(let j=1;j<=steps;j++){
-              const u=j/steps;
-              const t=prev.t+dt*u;
-              const alpha=Math.max(0,1-(time-t)/.8);
-              if(alpha<=0)continue;
-              const px=prev.p.x+(p.x-prev.p.x)*u,py=prev.p.y+(p.y-prev.p.y)*u;
-              x.fillStyle='rgba('+trailColors[i]+','+(.28+.70*alpha).toFixed(3)+')';
-              x.beginPath();x.arc(px,py,i===15||i===16?3.8:3.3,0,Math.PI*2);x.fill();
-            }
-          }
-        }else{
-          const alpha=Math.max(0,1-(time-frame.t)/.8);
-          x.fillStyle='rgba('+trailColors[i]+','+(.28+.70*alpha).toFixed(3)+')';
-          x.beginPath();x.arc(p.x,p.y,3.5,0,Math.PI*2);x.fill();
+        if(!p){sample++;continue;}
+        const age=time-frame.t;
+        const alpha=Math.max(0,1-age/.8);
+        if(alpha<=0){sample++;continue;}
+        // One center particle and two subtle satellites, not interpolated dots.
+        for(let k=0;k<3;k++){
+          const seed=sample*12.9898+i*78.233+k*37.719;
+          const angle=(Math.sin(seed)*43758.5453%1+1)%1*Math.PI*2;
+          const spread=k===0?0:(k===1?5.5:9);
+          const px=p.x+Math.cos(angle)*spread;
+          const py=p.y+Math.sin(angle)*spread;
+          const radius=k===0?2.6:(k===1?1.9:1.4);
+          x.fillStyle='rgba('+trailColors[i]+','+((k===0?.82:.48)*alpha).toFixed(3)+')';
+          x.beginPath();x.arc(px,py,radius,0,Math.PI*2);x.fill();
         }
-        prev={t:frame.t,p};
+        sample++;
       }
     }
     // Baseline 2: add the measured line effect only when enabled.
