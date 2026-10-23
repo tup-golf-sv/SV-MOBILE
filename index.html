@@ -539,6 +539,8 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important}
   <button id="frontJointBtn" class="dark" disabled>관절보기 OFF</button>
   <button id="frameBack" class="white" disabled>◀ 1프레임</button>
   <button id="frameNext" class="white" disabled>1프레임 ▶</button>
+  <label title="자동 감지된 스윙의 리플레이 속도" style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;color:#e8f7e9;font-size:12px;font-weight:700">자동배속
+  <select id="svAutoReplaySpeed" aria-label="자동 리플레이 배속" style="height:34px;border-radius:7px;background:#173d2e;color:white;border:1px solid #6a9781;padding:2px 5px;font-weight:700"><option value="0.1">0.1×</option><option value="0.25">0.25×</option><option value="0.5" selected>0.5×</option><option value="0.75">0.75×</option><option value="1">1.0×</option></select></label>
   <div style="position:relative">
     <button id="speedMenuBtn" class="white" disabled>속도 1.0× ▾</button>
     <div id="speedMenu" style="display:none;position:absolute;bottom:38px;right:0;z-index:20;background:#10291e;border:1px solid #365647;border-radius:9px;padding:5px;box-shadow:0 8px 24px rgba(0,0,0,.35)">
@@ -816,8 +818,8 @@ function startRecording(){
       $('frameBack').disabled=false;$('frameNext').disabled=false;
       $('speedMenuBtn').disabled=false;$('frontRotateBtn').disabled=false;
       $('replaySeek').disabled=false;
-      replay.playbackRate=1;
-      $('speedMenuBtn').textContent='속도 1.0× ▾';
+      replay.playbackRate=window.svGetAutoReplaySpeed?window.svGetAutoReplaySpeed():0.5;
+      $('speedMenuBtn').textContent='속도 '+replay.playbackRate.toFixed(replay.playbackRate%1?2:1)+'× ▾';
       document.querySelectorAll('.speedChoice').forEach(b=>{
         b.className='speedChoice '+(Number(b.dataset.speed)===1?'green':'white');
       });
@@ -1719,7 +1721,7 @@ $('disconnect').onclick=()=>{
           .forEach(id=>byId(id).disabled=false);
         byId('sideTimeTotal').textContent=(sideReplay.duration||0).toFixed(2);
         sideReplay.currentTime=0;
-        sideReplay.playbackRate=1;
+        sideReplay.playbackRate=window.svGetAutoReplaySpeed?window.svGetAutoReplaySpeed():0.5;
         sideReplay.play().catch(()=>{});
         byId('sideResult').textContent='최근 측면 스윙 · 정면과 동시 촬영 완료';
       };
@@ -2723,6 +2725,16 @@ background:#34493f;color:#fff;font:700 12px Arial,sans-serif;white-space:nowrap}
  };
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});
  else init();
+})();
+</script>
+<script id="svAutoReplaySpeedIndependent">
+(()=>{
+const allowed=new Set(['0.1','0.25','0.5','0.75','1']);
+let speed='0.5';
+try{const saved=localStorage.getItem('sv_mobile_auto_replay_speed');if(allowed.has(saved))speed=saved;}catch(e){}
+window.svGetAutoReplaySpeed=()=>Number(speed);
+const init=()=>{const el=document.getElementById('svAutoReplaySpeed');if(!el)return;el.value=speed;el.addEventListener('change',()=>{if(!allowed.has(el.value))return;speed=el.value;try{localStorage.setItem('sv_mobile_auto_replay_speed',speed);}catch(e){};});};
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 })();
 </script>
 </body>
