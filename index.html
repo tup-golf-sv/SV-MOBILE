@@ -1842,12 +1842,14 @@ $('disconnect').onclick=()=>{
   byId('frontRotateBtn').onclick=()=>{
     window.svFrontRotation=(window.svFrontRotation+90)%360;
     byId('frontRotateBtn').textContent='영상회전 '+window.svFrontRotation+'°';
+    resetReplayTrails('front');
     clearJointCanvas('front');
   };
 
   byId('sideRotateBtn').onclick=()=>{
     window.svSideRotation=(window.svSideRotation+90)%360;
     byId('sideRotateBtn').textContent='영상회전 '+window.svSideRotation+'°';
+    resetReplayTrails('side');
     clearJointCanvas('side');
   };
 
@@ -1866,27 +1868,54 @@ $('disconnect').onclick=()=>{
     return p;
   }
 
+  // Replay trails are built exclusively from observed MediaPipe landmarks.
+  const replayTrailData={front:{13:[],14:[],15:[],16:[]},side:{13:[],14:[],15:[],16:[]}};
+  const replayTrailLastTime={front:-1,side:-1};
+  function resetReplayTrails(which){
+    for(const i of [13,14,15,16])replayTrailData[which][i].length=0;
+    replayTrailLastTime[which]=-1;
+  }
   function drawReplayJoints(which,lm){
     const c=which==='front'?frontJointCanvas:sideJointCanvas;
     const stage=which==='front'?frontStage:byId('sideVideoStage');
-    if(!c||!stage) return;
+    const video=which==='front'?byId('replay'):sideReplay;
+    if(!c||!stage||!video)return;
     const r=stage.getBoundingClientRect();
-    const w=Math.max(1,Math.round(r.width)), h=Math.max(1,Math.round(r.height));
-    if(c.width!==w||c.height!==h){c.width=w;c.height=h;}
+    const w=Math.max(1,Math.round(r.width)),h=Math.max(1,Math.round(r.height));
+    if(c.width!==w||c.height!==h){c.width=w;c.height=h;resetReplayTrails(which);}
     const x=c.getContext('2d');
     x.clearRect(0,0,w,h);
-    if(!lm) return;
-
-    // MediaPipe 입력은 아래 jointLoop에서 90° 정상화된 캔버스이므로 좌표 그대로 사용.
-    const pairs=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
-    x.lineWidth=3;x.strokeStyle='rgba(255,255,255,.95)';x.fillStyle='#fff';
-    for(const [a,b] of pairs){
-      const p=lm[a],q=lm[b]; if(!p||!q||(p.visibility||0)<.3||(q.visibility||0)<.3)continue;
-      x.beginPath();x.moveTo(p.x*w,p.y*h);x.lineTo(q.x*w,q.y*h);x.stroke();
-    }
-    for(const i of [11,12,13,14,15,16,23,24,25,26,27,28]){
-      const p=lm[i];if(!p||(p.visibility||0)<.3)continue;
-      x.beginPath();x.arc(p.x*w,p.y*h,5,0,Math.PI*2);x.fill();
+    if(!lm)return;
+    const time=video.currentTime||0;
+    if(replayTrailLastTime[which]>=0 && time<replayTrailLastTime[which]-.06)resetReplayTrails(which);
+    replayTrailLastTime[which]=time;
+    const specs=[
+      {i:13,rgb:'255,218,38',alpha:.38,width:1.1,radius:2.6},
+      {i:14,rgb:'255,218,38',alpha:.38,width:1.1,radius:2.6},
+      {i:15,rgb:'255,55,55',alpha:.95,width:1.5,radius:3},
+      {i:16,rgb:'255,55,55',alpha:.95,width:1.5,radius:3}
+    ];
+    for(const spec of specs){
+      const p=lm[spec.i],history=replayTrailData[which][spec.i];
+      const valid=p&&Number.isFinite(p.x)&&Number.isFinite(p.y)&&(p.visibility??1)>=.55;
+      // Skip duplicate video timestamps, including pause frames.
+      if(history.length===0||Math.abs(time-history[history.length-1].t)>.008){
+        history.push(valid?{x:p.x*w,y:p.y*h,t:time,valid:true}:{t:time,valid:false});
+        if(history.length>1200)history.shift();
+      }
+      x.save();x.lineWidth=spec.width;x.strokeStyle='rgba('+spec.rgb+','+spec.alpha+')';
+      x.beginPath();let started=false;
+      for(const point of history){
+        if(!point.valid){started=false;continue;}
+        if(!started){x.moveTo(point.x,point.y);started=true;}
+        else x.lineTo(point.x,point.y);
+      }
+      x.stroke();
+      if(valid){
+        x.fillStyle='rgba('+spec.rgb+','+(spec.i>=15?1:.48)+')';
+        x.beginPath();x.arc(p.x*w,p.y*h,spec.radius,0,Math.PI*2);x.fill();
+      }
+      x.restore();
     }
   }
 
@@ -1932,6 +1961,12 @@ $('disconnect').onclick=()=>{
   }
   jointLoop();
 
+  for(const [which,video] of [['front',byId('replay')],['side',sideReplay]]){
+    if(!video)continue;
+    for(const event of ['seeking','loadedmetadata','emptied']){
+      video.addEventListener(event,()=>{resetReplayTrails(which);clearJointCanvas(which);});
+    }
+  }
   function clearJoint(which){
     const c=which==='front'?frontJointCanvas:sideJointCanvas;
     if(c) c.getContext('2d').clearRect(0,0,c.width,c.height);
