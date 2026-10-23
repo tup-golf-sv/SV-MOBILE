@@ -493,7 +493,8 @@ html,body{width:100%!important;height:100%!important;overflow:hidden!important}
 /* Width-only replay controls. Restore original heights and fonts. */
 body>#svFloatingReplay{gap:6px!important;padding:4px!important;justify-content:flex-start!important;overflow-x:auto!important}
 body>#svFloatingReplay button{height:clamp(29px,3.5vw,36px)!important;min-height:0!important;padding:3px clamp(5px,.6vw,10px)!important;font-size:clamp(10px,1vw,13px)!important}
-body>#svFloatingReplay #replayPlay,body>#svFloatingReplay #replayPause{width:110px!important;min-width:110px!important;flex-shrink:0!important}
+body>#svFloatingReplay #replayPlay,body>#svFloatingReplay #replayPause{width:110px!important;min-width:110px!important;max-width:none!important;flex:0 0 110px!important;box-sizing:border-box!important}
+body>#svFloatingReplay #frontJointBtn{flex:0 0 auto!important}
 body>#svFloatingReplay #frameBack,body>#svFloatingReplay #frameNext{width:110px!important;min-width:110px!important;flex-shrink:0!important}
 body>#svFloatingReplay #svAutoReplaySpeed{height:34px!important;min-height:0!important;font-size:12px!important}
 @media(max-width:700px){
@@ -543,11 +544,11 @@ body>#svFloatingReplay #svAutoReplaySpeed{height:34px!important;min-height:0!imp
 </div>
 <video id="replay" playsinline loop muted></video>
 <div class="controls">
-  <button id="replayPlay" class="white" disabled>재생</button>
+  <button id="frontJointBtn" class="dark" disabled>관절보기 OFF</button>
   <button id="replayPause" class="dark" disabled>일시정지</button>
   <button id="sendA" class="green" disabled>A화면 보내기</button>
   <button id="sendB" class="green" disabled>B화면 보내기</button>
-  <button id="frontJointBtn" class="dark" disabled>관절보기 OFF</button>
+  <button id="replayPlay" class="white" disabled>재생</button>
   <button id="frameBack" class="white" disabled>◀ 1프레임</button>
   <button id="frameNext" class="white" disabled>1프레임 ▶</button>
   <label title="자동 감지된 스윙의 리플레이 속도" style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;color:#e8f7e9;font-size:12px;font-weight:700">자동배속
