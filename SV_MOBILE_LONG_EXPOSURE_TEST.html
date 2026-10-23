@@ -859,8 +859,17 @@ function svPoseDisplayPoint(p){
 // Never interpolate across missing or low-confidence observations.
 const svJointTrailHistory={13:[],14:[],15:[],16:[]};
 const svJointTrailLimit=900;
+const svSkeletonExposureMs=1500;
+const svSkeletonExposure=[];
+const svSkeletonPairs=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
+function svSkeletonColor(a,b){
+  if((a===11&&b===13)||(a===13&&b===15))return '255,72,72'; // anatomical left arm
+  if((a===12&&b===14)||(a===14&&b===16))return '50,145,255'; // anatomical right arm
+  return '255,255,255';
+}
 function svResetJointTrails(){
   for(const k of [13,14,15,16])svJointTrailHistory[k].length=0;
+  svSkeletonExposure.length=0;
 }
 function drawSkeleton(lm){
   if(!lm)return;
@@ -873,26 +882,45 @@ function drawSkeleton(lm){
     return {x:hipCenter.x+(pt.x-hipCenter.x)*1.2,
             y:hipCenter.y+(pt.y-hipCenter.y)*1.2};
   };
-  // Keep the complete skeleton visible but light, below the four trails.
-  const pairs=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
-  ctx.save();ctx.strokeStyle='rgba(255,255,255,.78)';ctx.lineWidth=2.2;
-  for(const [a,b] of pairs){
-    const p=lm[a],q=lm[b];
-    if(!p||!q||(p.visibility??1)<.45||(q.visibility??1)<.45)continue;
-    const v=displayPoint(p),u=displayPoint(q);
-    ctx.beginPath();ctx.moveTo(v.x,v.y);ctx.lineTo(u.x,u.y);ctx.stroke();
+  // R7 visual-only: full-body 1.5-second exposure. Never feed trails into swing detection.
+  const now=performance.now();
+  const points={};
+  for(const i of [11,12,13,14,15,16,23,24,25,26,27,28]){
+    const p=lm[i];
+    if(p&&Number.isFinite(p.x)&&Number.isFinite(p.y)&&(p.visibility??1)>=.45)points[i]=displayPoint(p);
   }
-  ctx.fillStyle='rgba(255,255,255,.7)';
-  for(const i of [11,12,23,24,25,26,27,28]){
-    const p=lm[i];if(!p||(p.visibility??1)<.45)continue;
-    const v=displayPoint(p);ctx.beginPath();ctx.arc(v.x,v.y,4.2,0,Math.PI*2);ctx.fill();
+  svSkeletonExposure.push({t:now,points});
+  while(svSkeletonExposure.length&&now-svSkeletonExposure[0].t>svSkeletonExposureMs)svSkeletonExposure.shift();
+  ctx.save();ctx.lineCap='round';ctx.lineJoin='round';
+  for(const frame of svSkeletonExposure){
+    const age=now-frame.t;
+    const alpha=Math.max(0,1-age/svSkeletonExposureMs);
+    if(alpha<=0)continue;
+    for(const [a,b] of svSkeletonPairs){
+      const p=frame.points[a],q=frame.points[b];
+      if(!p||!q)continue;
+      ctx.strokeStyle='rgba('+svSkeletonColor(a,b)+','+(0.40*alpha).toFixed(3)+')';
+      ctx.lineWidth=1.6;
+      ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(q.x,q.y);ctx.stroke();
+    }
+  }
+  for(const [a,b] of svSkeletonPairs){
+    const p=points[a],q=points[b];if(!p||!q)continue;
+    ctx.strokeStyle='rgba('+svSkeletonColor(a,b)+',.9)';
+    ctx.lineWidth=2.2;ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(q.x,q.y);ctx.stroke();
+  }
+  for(const i of [11,12,13,14,15,16,23,24,25,26,27,28]){
+    const p=points[i];if(!p)continue;
+    const color=[11,13,15].includes(i)?'255,72,72':[12,14,16].includes(i)?'50,145,255':'255,255,255';
+    ctx.fillStyle='rgba('+color+',.95)';
+    ctx.beginPath();ctx.arc(p.x,p.y,4.2,0,Math.PI*2);ctx.fill();
   }
   ctx.restore();
   const specs=[
-    {i:13,color:'255,218,38',alpha:.78,width:2.3},
-    {i:14,color:'255,218,38',alpha:.78,width:2.3},
-    {i:15,color:'255,55,55',alpha:.98,width:2.8},
-    {i:16,color:'255,55,55',alpha:.98,width:2.8}
+    {i:13,color:'255,72,72',alpha:.78,width:2.3},
+    {i:14,color:'50,145,255',alpha:.78,width:2.3},
+    {i:15,color:'255,72,72',alpha:.98,width:2.8},
+    {i:16,color:'50,145,255',alpha:.98,width:2.8}
   ];
   for(const spec of specs){
     const p=lm[spec.i],history=svJointTrailHistory[spec.i];
