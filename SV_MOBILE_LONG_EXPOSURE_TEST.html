@@ -1522,11 +1522,20 @@ $('disconnect').onclick=()=>{
   function svShowLive(){
     const wrap=document.querySelector('.wrap');if(!wrap)return;
     wrap.classList.add('live-first-mode');wrap.classList.remove('replay-mode');
+    // Force replay-only overlays off and clear their pixels during camera LIVE.
+    for(const id of ['frontJointCanvas','sideJointCanvas']){
+      const c=byId(id);if(!c)continue;
+      c.style.setProperty('display','none','important');
+      c.getContext('2d')?.clearRect(0,0,c.width,c.height);
+    }
     setTimeout(()=>{ if(typeof window.fitLiveStageInsideViewport==='function') window.fitLiveStageInsideViewport(); },30);
   }
   function svShowReplay(){
     const wrap=document.querySelector('.wrap');if(!wrap)return;
     wrap.classList.remove('live-first-mode');wrap.classList.add('replay-mode');
+    for(const id of ['frontJointCanvas','sideJointCanvas']){
+      const c=byId(id);if(c)c.style.removeProperty('display');
+    }
     if(typeof applyCameraLayout==='function')applyCameraLayout();
   }
 
@@ -1633,6 +1642,9 @@ $('disconnect').onclick=()=>{
     </div>
     <div id="sideResult" class="status">측면 카메라 연결 대기</div>`;
   frontPanel.insertAdjacentElement('afterend',side);
+  // Initial svShowLive can run before replay canvases are created.
+  // Apply the LIVE visibility guard again after both canvases exist.
+  if(document.querySelector('.wrap')?.classList.contains('live-first-mode'))svShowLive();
 
   byId('liveViewBtn')?.addEventListener('click',()=>{
     svShowLive();
