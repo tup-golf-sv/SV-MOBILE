@@ -2075,17 +2075,36 @@ $('disconnect').onclick=()=>{
         x.lineWidth=1;x.beginPath();x.moveTo(p.x,p.y);x.lineTo(q.x,q.y);x.stroke();
       }
     }
-    // Dotted 0.8s wrist/elbow trajectories, from actual sampled joint positions.
-    // No synthetic interpolation across missing frames or tracking gaps.
+    // Draw a clearly visible dotted trace between consecutive *measured* poses.
+    // Interpolation only fills the visual gaps between adjacent valid samples.
     const trailColors={13:'255,165,0',15:'255,72,72',14:'48,205,94',16:'50,145,255'};
     for(const i of [13,15,14,16]){
+      let prev=null;
       for(const frame of hist){
-        const p=frame.pts[i];if(!p)continue;
-        const alpha=Math.max(0,1-(time-frame.t)/.8);
-        if(alpha<=0)continue;
-        const radius=(i===15||i===16?3.3:2.8);
-        x.fillStyle='rgba('+trailColors[i]+','+(.18+.77*alpha).toFixed(3)+')';
-        x.beginPath();x.arc(p.x,p.y,radius,0,Math.PI*2);x.fill();
+        const p=frame.pts[i];
+        if(!p){prev=null;continue;}
+        if(prev){
+          const dt=frame.t-prev.t;
+          const dist=Math.hypot(p.x-prev.p.x,p.y-prev.p.y);
+          // Do not connect across missing/large temporal gaps or implausible jumps.
+          if(dt>0&&dt<=.22&&dist<=Math.max(w,h)*.32){
+            const steps=Math.max(1,Math.ceil(dist/9));
+            for(let j=1;j<=steps;j++){
+              const u=j/steps;
+              const t=prev.t+dt*u;
+              const alpha=Math.max(0,1-(time-t)/.8);
+              if(alpha<=0)continue;
+              const px=prev.p.x+(p.x-prev.p.x)*u,py=prev.p.y+(p.y-prev.p.y)*u;
+              x.fillStyle='rgba('+trailColors[i]+','+(.28+.70*alpha).toFixed(3)+')';
+              x.beginPath();x.arc(px,py,i===15||i===16?3.8:3.3,0,Math.PI*2);x.fill();
+            }
+          }
+        }else{
+          const alpha=Math.max(0,1-(time-frame.t)/.8);
+          x.fillStyle='rgba('+trailColors[i]+','+(.28+.70*alpha).toFixed(3)+')';
+          x.beginPath();x.arc(p.x,p.y,3.5,0,Math.PI*2);x.fill();
+        }
+        prev={t:frame.t,p};
       }
     }
     for(const [a,b] of pairs){
