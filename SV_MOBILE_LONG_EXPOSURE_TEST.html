@@ -2086,30 +2086,39 @@ $('disconnect').onclick=()=>{
     }
     while(pathFrames.length&&time-pathFrames[0].t>8)pathFrames.shift();
     for(const i of [13,15,14,16]){
-      const maxJump=Math.max(18,Math.min(w,h)*.11);
-      let prev=null,run=[];
-      const runs=[];
+      // Replay poses are sampled much more sparsely than the original LIVE
+      // camera stream. Preserve a valid measured path across normal gaps.
+      const maxJump=Math.max(45,Math.min(w,h)*.30);
+      let prev=null,run=[];const runs=[];
       for(const frame of pathFrames){
         const p=frame.pts[i];
-        if(!p){if(run.length>1)runs.push(run);run=[];prev=null;continue;}
+        if(!p){if(run.length)runs.push(run);run=[];prev=null;continue;}
         if(prev){
           const dt=frame.t-prev.t;
-          if(dt<=0||dt>.22||Math.hypot(p.x-prev.x,p.y-prev.y)>maxJump){
-            if(run.length>1)runs.push(run);
+          if(dt<=0||dt>.45||Math.hypot(p.x-prev.x,p.y-prev.y)>maxJump){
+            if(run.length)runs.push(run);
             run=[];prev=null;
           }
         }
         const smooth=prev?{x:prev.x*.60+p.x*.40,y:prev.y*.60+p.y*.40,t:frame.t}:{x:p.x,y:p.y,t:frame.t};
         run.push(smooth);prev=smooth;
       }
-      if(run.length>1)runs.push(run);
+      if(run.length)runs.push(run);
       for(const segment of runs){
         x.save();x.lineCap='round';x.lineJoin='round';
-        x.strokeStyle='rgba('+trailColors[i]+',.90)';
-        x.lineWidth=i>=15?2.8:2.3;
-        x.beginPath();x.moveTo(segment[0].x,segment[0].y);
-        for(let k=1;k<segment.length;k++)x.lineTo(segment[k].x,segment[k].y);
-        x.stroke();x.restore();
+        x.strokeStyle='rgba('+trailColors[i]+',.88)';
+        x.lineWidth=1.4;
+        if(segment.length>1){
+          x.beginPath();x.moveTo(segment[0].x,segment[0].y);
+          for(let k=1;k<segment.length;k++)x.lineTo(segment[k].x,segment[k].y);
+          x.stroke();
+        }
+        // Visible dots at observed positions, even when tracking breaks.
+        for(const p of segment){
+          x.fillStyle='rgba('+trailColors[i]+',.96)';
+          x.beginPath();x.arc(p.x,p.y,3.1,0,Math.PI*2);x.fill();
+        }
+        x.restore();
       }
     }
     for(const [a,b] of pairs){
