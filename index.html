@@ -3232,7 +3232,11 @@ body>#svFloatingReplay #svGhostButton{width:var(--sv-control-width,110px)!import
   const main=document.getElementById('replay'),stage=document.getElementById('mainVideoStage'),bar=document.getElementById('svFloatingReplay')||document.body;
   if(!main||!stage)return;
   const ghost=document.createElement('video');ghost.muted=true;ghost.playsInline=true;ghost.preload='auto';
-  const canvas=document.createElement('canvas');canvas.id='svGhostCanvas';stage.append(canvas);const ctx=canvas.getContext('2d');
+  // Use the browser's native video compositor; do not copy decoded frames into a canvas.
+  const canvas=document.createElement('div');canvas.id='svGhostCanvas';stage.append(canvas);canvas.append(ghost);
+  ghost.style.cssText='position:absolute;display:block;left:50%;top:50%;max-width:none;max-height:none;pointer-events:none;transform-origin:center;object-fit:contain;background:transparent';
+  let lastMode=null,lastTransform=null,lastUiTime=-Infinity,lastCorrection=-Infinity,forceSync=true,lastMainTime=0;
+  const style=(el,key,value)=>{if(el.style[key]!==value)el.style[key]=value};
   const button=document.createElement('button');button.id='svGhostButton';button.className='dark';button.textContent='고스트';button.title='기준 영상을 겹쳐 비교';button.setAttribute('aria-expanded','false');
   const anchor=document.getElementById('svTrailToggle');if(anchor&&anchor.parentElement===bar)anchor.insertAdjacentElement('afterend',button);else bar.append(button);
   const panel=document.createElement('div');panel.id='svGhostPanel';panel.hidden=true;
@@ -3265,11 +3269,14 @@ body>#svFloatingReplay #svGhostButton{width:var(--sv-control-width,110px)!import
   const setMode=()=>{
    const live=isLive(),target=live?liveStage:stage;
    if(canvas.parentElement!==target)target.append(canvas);
-   canvas.style.transformOrigin='50% 50%';
-   canvas.style.transform=live?'none':document.getElementById('replayCanvas')?.style.transform||'none';
-   ghost.loop=live;get('Mode').textContent=live?'실시간':'리플레이';
-   get('LivePlay').hidden=!live;get('Align').hidden=live;
-   get('Offset').parentElement.hidden=live;
+   style(canvas,'transformOrigin','50% 50%');
+   const transform=live?'none':document.getElementById('replayCanvas')?.style.transform||'none';
+   if(transform!==lastTransform){style(canvas,'transform',transform);lastTransform=transform;}
+   if(lastMode!==live){
+    ghost.loop=live;get('Mode').textContent=live?'실시간':'리플레이';
+    get('LivePlay').hidden=!live;get('Align').hidden=live;
+    get('Offset').parentElement.hidden=live;lastMode=live;forceSync=true;
+   }
   };
   get('LivePlay').onclick=()=>{
    if(!enabled()){message('기준 영상을 선택하고 고스트 표시를 켜주세요.');return;}
@@ -3280,11 +3287,11 @@ body>#svFloatingReplay #svGhostButton{width:var(--sv-control-width,110px)!import
   button.onclick=()=>show(panel.hidden);get('Close').onclick=()=>show(false);
   get('Load').onclick=()=>get('File').click();
   const syncPlayback=()=>{
-   if(isLive()){if(!enabled())ghost.pause();else ghost.playbackRate=ghostRate();return;}
+   if(isLive()){if(!enabled())ghost.pause();else if(ghost.playbackRate!==ghostRate())ghost.playbackRate=ghostRate();return;}
    if(!enabled()||main.paused||preview){ghost.pause();return;}
    const target=main.currentTime*ghostRate()+offset;
    if(target<0||target>=ghost.duration){ghost.pause();return;}
-   ghost.playbackRate=main.playbackRate*ghostRate();
+   if(ghost.playbackRate!==main.playbackRate*ghostRate())ghost.playbackRate=main.playbackRate*ghostRate();
    if(ghost.paused&&!pending){pending=true;ghost.play().catch(()=>message('기준 영상 재생을 시작하지 못했습니다. 재생 버튼을 다시 눌러주세요.')).finally(()=>pending=false);}
   };
   get('File').onchange=()=>{
@@ -3315,32 +3322,41 @@ body>#svFloatingReplay #svGhostButton{width:var(--sv-control-width,110px)!import
    offset=ghost.currentTime-main.currentTime*ghostRate();get('Offset').value=offset.toFixed(3);preview=false;
    message('시점 맞춤 완료. 재생하면 두 영상이 함께 움직입니다. 시간 차 '+offset.toFixed(3)+'초');syncPlayback();
   };
-  get('Offset').onchange=()=>{const n=Number(get('Offset').value);if(!Number.isFinite(n))return;offset=Math.max(-3600,Math.min(3600,n));get('Offset').value=offset;preview=false;syncPlayback()};
-  main.addEventListener('play',()=>{if(isLive())return;preview=false;syncPlayback()});main.addEventListener('pause',syncPlayback);main.addEventListener('ratechange',syncPlayback);
-  main.addEventListener('loadedmetadata',()=>{if(isLive())return;offset=0;get('Offset').value=0;preview=false;if(url)message('리플레이가 바뀌었습니다. 기준 영상과 시점을 다시 맞춰주세요.')});
-  function draw(){
+  get('Offset').onchange=()=>{const n=Number(get('Offset').value);if(!Number.isFinite(n))return;offset=Math.max(-3600,Math.min(3600,n));get('Offset').value=offset;preview=false;forceSync=true;syncPlayback()};
+  main.addEventListener('play',()=>{if(isLive())return;preview=false;forceSync=true;syncPlayback()});main.addEventListener('pause',syncPlayback);main.addEventListener('ratechange',syncPlayback);
+  main.addEventListener('seeked',()=>{if(!isLive())forceSync=true});
+  main.addEventListener('loadedmetadata',()=>{if(isLive())return;forceSync=true;offset=0;get('Offset').value=0;preview=false;if(url)message('리플레이가 바뀌었습니다. 기준 영상과 시점을 다시 맞춰주세요.')});
+  function draw(now=performance.now()){
    if(disposed)return;
-   setMode();const activeStage=isLive()?liveStage:stage;
+   setMode();const live=isLive(),activeStage=live?liveStage:stage;
    const w=Math.max(1,activeStage.clientWidth),h=Math.max(1,activeStage.clientHeight);
-   if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}ctx.clearRect(0,0,w,h);
-   if(enabled()){
-    const live=isLive(),target=main.currentTime*ghostRate()+offset,inside=live||preview||(target>=0&&target<ghost.duration);
-    if(inside){
-     if(!live&&!preview){
-      if(Math.abs(ghost.currentTime-target)>(main.paused?.015:.12)&&!ghost.seeking)ghost.currentTime=target;
-      if(main.paused)ghost.pause();
+   const target=main.currentTime*ghostRate()+offset;
+   const inside=enabled()&&(live||preview||(target>=0&&target<ghost.duration));
+   style(canvas,'visibility',inside?'visible':'hidden');
+   if(inside){
+    if(!live&&!preview){
+     if(main.currentTime<lastMainTime-.06)forceSync=true;
+     const drift=Math.abs(ghost.currentTime-target);
+     // Seek once on explicit frame/time changes; only correct substantial drift while playing.
+     const correct=forceSync||(main.paused&&drift>.025)||(now-lastCorrection>1000&&drift>.45);
+     if(correct&&!ghost.seeking){
+      if(drift>.025)ghost.currentTime=target;
+      lastCorrection=now;forceSync=false;
      }
-     const swap=rotation===90||rotation===270,sw=ghost.videoWidth,sh=ghost.videoHeight;
-     const fit=Math.min(w/(swap?sh:sw),h/(swap?sw:sh))*Number(get('Size').value)/100;
-     ctx.save();ctx.globalAlpha=Number(get('Alpha').value)/100;
-     ctx.translate(w/2+w*Number(get('X').value)/100,h/2+h*Number(get('Y').value)/100);
-     ctx.scale(get('Flip').checked?-1:1,1);ctx.rotate(rotation*Math.PI/180);
-     ctx.drawImage(ghost,-sw*fit/2,-sh*fit/2,sw*fit,sh*fit);ctx.restore();
-     if(!preview){get('Seek').value=ghost.currentTime;get('Seek').nextElementSibling.textContent=ghost.currentTime.toFixed(2)+'초';}
-    }else ghost.pause();
-    // Resume after a loop or when re-entering the reference clip's time range.
-    if(!live&&inside&&!main.paused&&!preview)syncPlayback();
-   }
+     if(main.paused&&!ghost.paused)ghost.pause();
+    }
+    const swap=rotation===90||rotation===270,sw=ghost.videoWidth,sh=ghost.videoHeight;
+    const fit=Math.min(w/(swap?sh:sw),h/(swap?sw:sh))*Number(get('Size').value)/100;
+    style(ghost,'width',sw*fit+'px');style(ghost,'height',sh*fit+'px');
+    style(ghost,'opacity',String(Number(get('Alpha').value)/100));
+    const dx=w*Number(get('X').value)/100,dy=h*Number(get('Y').value)/100;
+    style(ghost,'transform',`translate(-50%,-50%) translate(${dx}px,${dy}px) scaleX(${get('Flip').checked?-1:1}) rotate(${rotation}deg)`);
+    if(!preview&&!panel.hidden&&now-lastUiTime>=250){
+     get('Seek').value=ghost.currentTime;get('Seek').nextElementSibling.textContent=ghost.currentTime.toFixed(2)+'초';lastUiTime=now;
+    }
+    if(!live&&!main.paused&&!preview&&ghost.paused)syncPlayback();
+   }else if(!ghost.paused)ghost.pause();
+   lastMainTime=main.currentTime;
    requestAnimationFrame(draw);
   }
   if(wrap)new MutationObserver(()=>{ghost.pause();preview=false;setMode();if(!isLive())syncPlayback()}).observe(wrap,{attributes:true,attributeFilter:['class']});
