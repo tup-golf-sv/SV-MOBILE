@@ -871,6 +871,35 @@ function svResetJointTrails(){
   for(const k of [13,14,15,16])svJointTrailHistory[k].length=0;
   svSkeletonExposure.length=0;
 }
+// Display-only head outline from observed face landmarks. Detection is unchanged.
+function svDrawHeadOutline(cx,lm,project){
+  const valid=i=>{const p=lm&&lm[i];return p&&Number.isFinite(p.x)&&Number.isFinite(p.y)&&(p.visibility??1)>=.45;};
+  const face=[0,2,5,7,8].filter(valid).map(i=>project(lm[i]));
+  if(face.length<3)return;
+  let center,radius;
+  if(valid(7)&&valid(8)){
+    const a=project(lm[7]),b=project(lm[8]);
+    center={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+    radius=Math.hypot(a.x-b.x,a.y-b.y)*.60;
+  }else{
+    const xs=face.map(p=>p.x),ys=face.map(p=>p.y);
+    center={x:(Math.min(...xs)+Math.max(...xs))/2,y:(Math.min(...ys)+Math.max(...ys))/2};
+    radius=Math.max(...face.map(p=>Math.hypot(p.x-center.x,p.y-center.y)))*1.25;
+  }
+  if(!Number.isFinite(radius)||radius<3)return;
+  cx.save();cx.strokeStyle='rgba(255,255,255,.9)';cx.lineWidth=1.7;
+  if(valid(11)&&valid(12)){
+    const a=project(lm[11]),b=project(lm[12]);
+    const neck={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+    const dx=neck.x-center.x,dy=neck.y-center.y,d=Math.hypot(dx,dy);
+    if(d>radius){
+      cx.beginPath();cx.moveTo(neck.x,neck.y);
+      cx.lineTo(center.x+dx*radius/d,center.y+dy*radius/d);cx.stroke();
+    }
+  }
+  cx.beginPath();cx.arc(center.x,center.y,radius,0,Math.PI*2);cx.stroke();cx.restore();
+}
+
 function drawSkeleton(lm){
   if(!lm)return;
   const leftHip=lm[23],rightHip=lm[24];
@@ -915,6 +944,7 @@ function drawSkeleton(lm){
     ctx.fillStyle='rgba('+color+',.95)';
     ctx.beginPath();ctx.arc(p.x,p.y,4.2,0,Math.PI*2);ctx.fill();
   }
+  svDrawHeadOutline(ctx,lm,displayPoint);
   ctx.restore();
   // R7 correction: draw only the current wrist/elbow markers.
   // Legacy long-running point paths were overlaying the 1.5s full-body exposure.
@@ -1467,7 +1497,18 @@ function sendReplayToTUp(slot){
 if($('sendA'))$('sendA').onclick=()=>sendReplayToTUp('A');
 if($('sendB'))$('sendB').onclick=()=>sendReplayToTUp('B');
 
-$('replayPlay').onclick=()=>replay.play().catch(()=>{});
+// One control follows the actual video state, including automatic replay and frame stepping.
+function svSyncReplayToggle(){
+  const button=$('replayPlay');
+  const label=replay.paused||replay.ended?'재생':'일시정지';
+  button.textContent=label;button.setAttribute('aria-label',label);
+}
+$('replayPlay').onclick=()=>{
+  if(replay.paused||replay.ended)replay.play().catch(()=>svSyncReplayToggle());
+  else replay.pause();
+};
+for(const event of ['play','pause','ended','emptied','loadedmetadata'])replay.addEventListener(event,svSyncReplayToggle);
+svSyncReplayToggle();
 $('replayPause').onclick=()=>replay.pause();
 
 const REPLAY_FPS=30;
@@ -2171,6 +2212,7 @@ $('disconnect').onclick=()=>{
       x.fillStyle='rgba('+rgb+',.98)';
       x.beginPath();x.arc(p.x,p.y,i===15||i===16?5:4,0,Math.PI*2);x.fill();
     }
+    svDrawHeadOutline(x,lm,project);
     x.restore();
   }
 
@@ -2730,6 +2772,7 @@ body #svCameraRotateBtn{top:calc(env(safe-area-inset-top,0px) + 107px)!important
   const btn=document.getElementById('svCameraRotateBtn');
   if(!btn)return;
   // Move outside the horizontally clipped camera toolbar, retaining its click listener.
+  if(btn.parentElement?.id==='svCompactViewDock')return;
   if(btn.parentElement!==document.body)document.body.appendChild(btn);
  }
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{place();requestAnimationFrame(place)},{once:true});
@@ -3072,35 +3115,252 @@ const init=()=>{const el=document.getElementById('svAutoReplaySpeed');if(!el)ret
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 })();
 </script>
-<script id="svEqualReplayButtonWidths">
+<style id="svUnifiedReplayControls">
+/* Equal main-control widths. Keep the existing single-row horizontal scrolling. */
+body #replayPause{display:none!important}
+body>#svFloatingReplay #replayPlay,
+body>#svFloatingReplay #frameBack,
+body>#svFloatingReplay #frameNext,
+body>#svFloatingReplay #frontJointBtn,
+body>#svFloatingReplay #svTrailToggle{
+ width:var(--sv-control-width,110px)!important;min-width:var(--sv-control-width,110px)!important;max-width:var(--sv-control-width,110px)!important;
+ flex:0 0 var(--sv-control-width,110px)!important;box-sizing:border-box!important;
+ display:inline-flex!important;align-items:center!important;justify-content:center!important;
+ padding-left:12px!important;padding-right:12px!important;white-space:nowrap!important;
+}
+</style>
+<script id="svMeasuredControlWidths">
 (()=>{
- const sync=()=>{
-  const bar=document.getElementById('svFloatingReplay');
-  const joint=document.getElementById('frontJointBtn');
-  if(!bar||!joint||joint.parentElement!==bar)return;
-  // The joint button retains its native measured width; other visible controls match it.
-  const width=joint.getBoundingClientRect().width;
-  if(!Number.isFinite(width)||width<40)return;
-  ['svTrailToggle','replayPause','replayPlay'].forEach(id=>{
-   const button=document.getElementById(id);
-   if(!button||button.parentElement!==bar)return;
-   const w=width+'px';
-   button.style.setProperty('width',w,'important');
-   button.style.setProperty('min-width',w,'important');
-   button.style.setProperty('max-width',w,'important');
-   button.style.setProperty('flex','0 0 '+w,'important');
-   button.style.setProperty('box-sizing','border-box','important');
-  });
- };
  const init=()=>{
-  sync();
-  const joint=document.getElementById('frontJointBtn');
-  if(joint&&typeof ResizeObserver!=='undefined')new ResizeObserver(sync).observe(joint);
-  const bar=document.getElementById('svFloatingReplay');
-  if(bar&&typeof MutationObserver!=='undefined')new MutationObserver(sync).observe(bar,{childList:true});
+  const bar=document.getElementById('svFloatingReplay');if(!bar)return;
+  const ids=['replayPlay','frameBack','frameNext','frontJointBtn','svTrailToggle','svGhostButton'];
+  const measure=document.createElement('canvas').getContext('2d');if(!measure)return;
+  const sync=()=>{
+   // Reserve space for both states before their labels change.
+   const states=['재생','일시정지','◀ 1프레임','1프레임 ▶','관절 OFF','관절 ON','궤적 OFF','궤적 ON'];
+   let width=78;
+   for(const id of ids){
+    const button=document.getElementById(id);if(!button)continue;
+    const style=getComputedStyle(button);measure.font=style.font||`${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    const spacing=parseFloat(style.letterSpacing)||0;
+    const extra=(parseFloat(style.paddingLeft)||0)+(parseFloat(style.paddingRight)||0)+(parseFloat(style.borderLeftWidth)||0)+(parseFloat(style.borderRightWidth)||0)+4;
+    for(const text of [...states,button.textContent.trim()])width=Math.max(width,measure.measureText(text).width+Math.max(0,text.length-1)*spacing+extra);
+   }
+   const value=Math.ceil(width)+'px';
+   if(bar.style.getPropertyValue('--sv-control-width')!==value)bar.style.setProperty('--sv-control-width',value);
+  };
+  sync();window.addEventListener('resize',sync);
+  if(document.fonts)document.fonts.ready.then(sync);
+  new MutationObserver(sync).observe(bar,{childList:true,subtree:true,characterData:true});
  };
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 })();
 </script>
+
+<style id="svReplayPinchStyle">
+#mainVideoStage,#sideVideoStage{touch-action:none!important}
+</style>
+<script id="svReplayPinchZoom">
+(()=>{
+ function setup(stageId,videoId,canvasIds){
+  const stage=document.getElementById(stageId),video=document.getElementById(videoId);
+  if(!stage||!video)return;
+  let scale=1,tx=0,ty=0,start=null,wasMulti=false,lastTap=0,down=null;
+  const points=new Map();
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const apply=()=>{
+   tx=clamp(tx,-stage.clientWidth*(scale-1)/2,stage.clientWidth*(scale-1)/2);
+   ty=clamp(ty,-stage.clientHeight*(scale-1)/2,stage.clientHeight*(scale-1)/2);
+   for(const id of canvasIds){const c=document.getElementById(id);if(!c)continue;
+    c.style.transformOrigin='50% 50%';
+    c.style.transform=`translate(${tx}px,${ty}px) scale(${scale})`;
+   }
+  };
+  const reset=()=>{scale=1;tx=ty=0;points.clear();start=null;down=null;wasMulti=false;lastTap=0;apply()};
+  const drawing=()=>stageId==='mainVideoStage'&&!!document.querySelector('#svDrawBar [data-mode].active:not([data-mode="off"])');
+  const pos=e=>({x:e.clientX,y:e.clientY});
+  const geometry=()=>{const a=[...points.values()],r=stage.getBoundingClientRect();
+   return {x:(a[0].x+a[1].x)/2-r.left-r.width/2,y:(a[0].y+a[1].y)/2-r.top-r.height/2,d:Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y)};
+  };
+  stage.addEventListener('pointerdown',e=>{
+   if(e.pointerType==='mouse'||drawing()||e.target.closest('button,input,select,label,a'))return;
+   points.set(e.pointerId,pos(e));stage.setPointerCapture(e.pointerId);e.preventDefault();
+   if(points.size===1){down={...pos(e),t:performance.now()};start={...pos(e),tx,ty};wasMulti=false;}
+   if(points.size===2){const g=geometry();start={...g,scale,ax:(g.x-tx)/scale,ay:(g.y-ty)/scale};wasMulti=true;lastTap=0;}
+  });
+  stage.addEventListener('pointermove',e=>{
+   if(!points.has(e.pointerId))return;
+   e.preventDefault();points.set(e.pointerId,pos(e));
+   if(points.size===2&&start&&start.d){const g=geometry();scale=clamp(start.scale*g.d/Math.max(1,start.d),1,4);tx=g.x-start.ax*scale;ty=g.y-start.ay*scale;apply();}
+   else if(points.size===1&&!wasMulti&&start&&scale>1){tx=start.tx+e.clientX-start.x;ty=start.ty+e.clientY-start.y;apply();}
+  });
+  const finish=e=>{
+   if(!points.has(e.pointerId))return;
+   if(e.type==='pointerup'&&!wasMulti&&down&&performance.now()-down.t<300&&Math.hypot(e.clientX-down.x,e.clientY-down.y)<8){
+    const now=performance.now();if(lastTap&&now-lastTap<300){reset();return;}lastTap=now;
+   }
+   points.delete(e.pointerId);if(!points.size){start=null;down=null;wasMulti=false;}
+  };
+  stage.addEventListener('pointerup',finish);stage.addEventListener('pointercancel',finish);stage.addEventListener('lostpointercapture',finish);
+  video.addEventListener('loadedmetadata',reset);window.addEventListener('resize',reset);
+  document.getElementById(stageId==='mainVideoStage'?'frontRotateBtn':'sideRotateBtn')?.addEventListener('click',reset);
+ }
+ const init=()=>{setup('mainVideoStage','replay',['replayCanvas','frontJointCanvas','svDrawOverlay','svGhostCanvas']);setup('sideVideoStage','sideReplay',['sideReplayCanvas','sideJointCanvas'])};
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
+})();
+</script>
+<style id="svGhostStyle">
+#svGhostCanvas{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;z-index:3!important;pointer-events:none!important;background:transparent!important}
+#svGhostPanel{position:fixed;z-index:6000;bottom:85px;right:8px;width:min(330px,calc(100vw - 16px));max-height:65dvh;overflow:auto;padding:12px;border:1px solid #82b99e;border-radius:12px;background:rgba(7,31,21,.96);color:white;font:13px Arial,sans-serif;box-shadow:0 4px 20px #0008}
+#svGhostPanel[hidden]{display:none!important}
+#svGhostPanel label{display:flex;align-items:center;gap:8px;margin:9px 0}
+#svGhostPanel input[type=range]{flex:1;min-width:60px}
+#svGhostPanel button{padding:5px 9px;height:34px;font-size:12px;margin:3px}
+#svGhostPanel output{min-width:45px;text-align:right;font-size:12px}
+#svGhostMessage{font-size:12px;line-height:1.5;margin:8px 0;overflow-wrap:anywhere;color:#c9e4d4}
+body>#svFloatingReplay #svGhostButton{width:var(--sv-control-width,110px)!important;min-width:var(--sv-control-width,110px)!important;max-width:var(--sv-control-width,110px)!important;flex:0 0 var(--sv-control-width,110px)!important;white-space:nowrap!important}
+</style>
+<script id="svGhostFeature">
+(()=>{
+ const init=()=>{
+  const main=document.getElementById('replay'),stage=document.getElementById('mainVideoStage'),bar=document.getElementById('svFloatingReplay')||document.body;
+  if(!main||!stage)return;
+  const ghost=document.createElement('video');ghost.muted=true;ghost.playsInline=true;ghost.preload='auto';
+  const canvas=document.createElement('canvas');canvas.id='svGhostCanvas';stage.append(canvas);const ctx=canvas.getContext('2d');
+  const button=document.createElement('button');button.id='svGhostButton';button.className='dark';button.textContent='고스트';button.title='기준 영상을 겹쳐 비교';button.setAttribute('aria-expanded','false');
+  const anchor=document.getElementById('svTrailToggle');if(anchor&&anchor.parentElement===bar)anchor.insertAdjacentElement('afterend',button);else bar.append(button);
+  const panel=document.createElement('div');panel.id='svGhostPanel';panel.hidden=true;
+  panel.innerHTML=`<strong>고스트 · 기준 스윙 겹치기</strong><button id="svGhostClose" style="float:right">닫기</button>
+  <p style="font-size:12px;line-height:1.5">LIVE에서는 카메라 위에 기준 영상을 겹칩니다. 리플레이에서는 두 영상의 같은 동작을 맞춰 비교합니다.</p>
+  <button id="svGhostLoad">기준 영상 열기</button><input id="svGhostFile" type="file" accept="video/*" hidden>
+  <label><input id="svGhostEnabled" type="checkbox" disabled>고스트 표시 <span id="svGhostMode">실시간</span></label>
+  <button id="svGhostLivePlay" disabled>기준 재생</button>
+  <label>투명도<input id="svGhostAlpha" type="range" min="10" max="80" value="35"><output>35%</output></label>
+  <label>크기<input id="svGhostSize" type="range" min="50" max="200" value="100"><output>100%</output></label>
+  <label>좌우 위치<input id="svGhostX" type="range" min="-100" max="100" value="0"><output>0%</output></label>
+  <label>상하 위치<input id="svGhostY" type="range" min="-100" max="100" value="0"><output>0%</output></label>
+  <label><input id="svGhostFlip" type="checkbox">좌우 반전</label>
+  <button id="svGhostRotate">기준 회전 0°</button><button id="svGhostReset">위치·크기 초기화</button>
+  <label>기준 장면<input id="svGhostSeek" type="range" min="0" max="1" step="0.01" value="0" disabled><output>0.00초</output></label>
+  <button id="svGhostAlign">현재 두 장면을 같은 시점으로 맞추기</button>
+  <label>시간 차<input id="svGhostOffset" type="number" min="-3600" max="3600" step="0.033" value="0" style="width:100px">초</label>
+  <div id="svGhostMessage" role="status">기준 영상을 선택하세요. 자동 동작 인식 없이 수동으로 시점을 맞춥니다.</div>`;
+  document.body.append(panel);
+  const get=id=>document.getElementById('svGhost'+id),message=text=>get('Message').textContent=text;
+  let url=null,rotation=0,preview=false,offset=0,pending=false,disposed=false;
+  const enabled=()=>get('Enabled').checked&&ghost.readyState>=2;
+  const wrap=document.querySelector('.wrap'),liveStage=document.getElementById('liveStage');
+  const isLive=()=>!!liveStage&&!wrap?.classList.contains('replay-mode');
+  const updateLiveLabel=()=>{get('LivePlay').textContent=ghost.paused?'기준 재생':'기준 정지'};
+  ghost.addEventListener('play',updateLiveLabel);ghost.addEventListener('pause',updateLiveLabel);
+  const setMode=()=>{
+   const live=isLive(),target=live?liveStage:stage;
+   if(canvas.parentElement!==target)target.append(canvas);
+   canvas.style.transformOrigin='50% 50%';
+   canvas.style.transform=live?'none':document.getElementById('replayCanvas')?.style.transform||'none';
+   ghost.loop=live;get('Mode').textContent=live?'실시간':'리플레이';
+   get('LivePlay').hidden=!live;get('Align').hidden=live;
+   get('Offset').parentElement.hidden=live;
+  };
+  get('LivePlay').onclick=()=>{
+   if(!enabled()){message('기준 영상을 선택하고 고스트 표시를 켜주세요.');return;}
+   preview=false;ghost.playbackRate=1;
+   if(ghost.paused)ghost.play().catch(()=>message('기준 재생 버튼을 다시 눌러주세요.'));else ghost.pause();
+  };
+  const show=open=>{panel.hidden=!open;button.setAttribute('aria-expanded',String(open))};
+  button.onclick=()=>show(panel.hidden);get('Close').onclick=()=>show(false);
+  get('Load').onclick=()=>get('File').click();
+  const syncPlayback=()=>{
+   if(isLive()){if(!enabled())ghost.pause();else ghost.playbackRate=1;return;}
+   if(!enabled()||main.paused||preview){ghost.pause();return;}
+   const target=main.currentTime+offset;
+   if(target<0||target>=ghost.duration){ghost.pause();return;}
+   ghost.playbackRate=main.playbackRate;
+   if(ghost.paused&&!pending){pending=true;ghost.play().catch(()=>message('기준 영상 재생을 시작하지 못했습니다. 재생 버튼을 다시 눌러주세요.')).finally(()=>pending=false);}
+  };
+  get('File').onchange=()=>{
+   const file=get('File').files?.[0];if(!file)return;
+   ghost.pause();get('Enabled').checked=false;get('Enabled').disabled=true;get('LivePlay').disabled=true;
+   if(url)URL.revokeObjectURL(url);url=URL.createObjectURL(file);
+   preview=false;offset=0;get('Offset').value=0;rotation=0;get('Rotate').textContent='기준 회전 0°';
+   ghost.src=url;ghost.load();message('기준 영상 준비 중: '+file.name);
+  };
+  ghost.addEventListener('loadedmetadata',()=>{get('Seek').max=Number.isFinite(ghost.duration)?ghost.duration:1;get('Seek').disabled=false;});
+  ghost.addEventListener('loadeddata',()=>{get('Enabled').disabled=false;get('Enabled').checked=true;get('LivePlay').disabled=false;message(isLive()?'실시간 카메라에 기준 영상을 겹쳤습니다. 기준 재생 또는 정지 장면으로 연습하세요.':'기준 영상을 겹쳤습니다. 같은 동작의 장면을 맞춰주세요.');syncPlayback()});
+  ghost.addEventListener('error',()=>{get('Enabled').checked=false;get('Enabled').disabled=true;message('이 기준 영상을 열 수 없습니다. 다른 MP4 영상을 선택하세요.')});
+  get('Enabled').onchange=syncPlayback;
+  for(const key of ['Alpha','Size','X','Y'])get(key).oninput=()=>get(key).nextElementSibling.textContent=get(key).value+'%';
+  get('Rotate').onclick=()=>{rotation=(rotation+90)%360;get('Rotate').textContent='기준 회전 '+rotation+'°'};
+  get('Reset').onclick=()=>{for(const key of ['Size','X','Y']){get(key).value=key==='Size'?100:0;get(key).oninput()}get('Flip').checked=false;rotation=0;get('Rotate').textContent='기준 회전 0°'};
+  get('Seek').oninput=()=>{if(!isLive())main.pause();ghost.pause();preview=true;ghost.currentTime=Number(get('Seek').value);get('Seek').nextElementSibling.textContent=ghost.currentTime.toFixed(2)+'초';message(isLive()?'선택한 기준 동작을 카메라 위에 고정했습니다.':'기준 장면을 고른 뒤 아래의 시점 맞추기를 누르세요.')};
+  get('Align').onclick=()=>{
+   if(!enabled()){message('기준 영상을 먼저 선택하고 고스트 표시를 켜주세요.');return;}
+   offset=ghost.currentTime-main.currentTime;get('Offset').value=offset.toFixed(3);preview=false;
+   message('시점 맞춤 완료. 재생하면 두 영상이 함께 움직입니다. 시간 차 '+offset.toFixed(3)+'초');syncPlayback();
+  };
+  get('Offset').onchange=()=>{const n=Number(get('Offset').value);if(!Number.isFinite(n))return;offset=Math.max(-3600,Math.min(3600,n));get('Offset').value=offset;preview=false;syncPlayback()};
+  main.addEventListener('play',()=>{if(isLive())return;preview=false;syncPlayback()});main.addEventListener('pause',syncPlayback);main.addEventListener('ratechange',syncPlayback);
+  main.addEventListener('loadedmetadata',()=>{if(isLive())return;offset=0;get('Offset').value=0;preview=false;if(url)message('리플레이가 바뀌었습니다. 기준 영상과 시점을 다시 맞춰주세요.')});
+  function draw(){
+   if(disposed)return;
+   setMode();const activeStage=isLive()?liveStage:stage;
+   const w=Math.max(1,activeStage.clientWidth),h=Math.max(1,activeStage.clientHeight);
+   if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}ctx.clearRect(0,0,w,h);
+   if(enabled()){
+    const live=isLive(),target=main.currentTime+offset,inside=live||preview||(target>=0&&target<ghost.duration);
+    if(inside){
+     if(!live&&!preview){
+      if(Math.abs(ghost.currentTime-target)>(main.paused?.015:.12)&&!ghost.seeking)ghost.currentTime=target;
+      if(main.paused)ghost.pause();
+     }
+     const swap=rotation===90||rotation===270,sw=ghost.videoWidth,sh=ghost.videoHeight;
+     const fit=Math.min(w/(swap?sh:sw),h/(swap?sw:sh))*Number(get('Size').value)/100;
+     ctx.save();ctx.globalAlpha=Number(get('Alpha').value)/100;
+     ctx.translate(w/2+w*Number(get('X').value)/100,h/2+h*Number(get('Y').value)/100);
+     ctx.scale(get('Flip').checked?-1:1,1);ctx.rotate(rotation*Math.PI/180);
+     ctx.drawImage(ghost,-sw*fit/2,-sh*fit/2,sw*fit,sh*fit);ctx.restore();
+     if(!preview){get('Seek').value=ghost.currentTime;get('Seek').nextElementSibling.textContent=ghost.currentTime.toFixed(2)+'초';}
+    }else ghost.pause();
+    // Resume after a loop or when re-entering the reference clip's time range.
+    if(!live&&inside&&!main.paused&&!preview)syncPlayback();
+   }
+   requestAnimationFrame(draw);
+  }
+  if(wrap)new MutationObserver(()=>{ghost.pause();preview=false;setMode();if(!isLive())syncPlayback()}).observe(wrap,{attributes:true,attributeFilter:['class']});
+  setMode();draw();window.addEventListener('pagehide',e=>{if(e.persisted)return;disposed=true;ghost.pause();if(url)URL.revokeObjectURL(url)});
+ };
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
+})();
+</script>
+
+<style id="svCompactViewDockStyle">
+#svCompactViewDock{position:fixed!important;left:8px!important;right:auto!important;top:auto!important;bottom:calc(env(safe-area-inset-bottom,0px) + 82px)!important;z-index:5100!important;display:flex!important;flex-direction:column!important;align-items:center!important;gap:6px!important}
+body #svCompactViewDock #svCameraRotateBtn,
+body #svCompactViewDock #svGhostButton{
+ position:static!important;inset:auto!important;transform:none!important;
+ width:54px!important;min-width:54px!important;max-width:54px!important;
+ height:32px!important;min-height:32px!important;max-height:32px!important;
+ flex:0 0 32px!important;padding:3px 4px!important;margin:0!important;
+ box-sizing:border-box!important;font:700 11px Arial,sans-serif!important;
+ white-space:nowrap!important;border-radius:8px!important;
+ background:rgba(10,56,39,.94)!important;color:#fff!important;
+ border:1px solid rgba(163,205,176,.6)!important;
+}
+</style>
+<script id="svCompactViewDockScript">
+(()=>{
+ const init=()=>{
+  const rotate=document.getElementById('svCameraRotateBtn'),ghost=document.getElementById('svGhostButton');
+  if(!rotate||!ghost)return;
+  const dock=document.createElement('div');dock.id='svCompactViewDock';
+  document.body.append(dock);dock.append(ghost,rotate);
+  const wrap=document.querySelector('.wrap');
+  const sync=()=>{ghost.hidden=false;ghost.style.setProperty('display','block','important')};
+  if(wrap)new MutationObserver(sync).observe(wrap,{attributes:true,attributeFilter:['class']});sync();
+ };
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
+})();
+</script>
+
 </body>
 </html>
