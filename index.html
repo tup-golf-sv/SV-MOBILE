@@ -545,7 +545,7 @@ body>#svFloatingReplay #svAutoReplaySpeed{height:34px!important;min-height:0!imp
 </div>
 <video id="replay" playsinline loop muted></video>
 <div class="controls">
-  <button id="frontJointBtn" class="dark" disabled>관절보기 OFF</button>
+  <button id="frontJointBtn" class="dark" disabled>관절 OFF</button>
   <button id="replayPause" class="dark" disabled>일시정지</button>
   <button id="sendA" class="green" disabled>A화면 보내기</button>
   <button id="sendB" class="green" disabled>B화면 보내기</button>
@@ -584,6 +584,93 @@ const replay=$('replay'), replayCanvas=$('replayCanvas'), rctx=replayCanvas.getC
 
 let stream=null, pose=null, armed=false, processing=false, raf=null;
 let recorder=null, chunks=[], recording=false;
+let svStopTimer=null;
+const SV_PREROLL_MS=1500,SV_CAPTURE_FPS=20,SV_FRAME_STEP=1000/SV_CAPTURE_FPS;
+const svRolling={front:[],side:[]};
+let svCaptureInterval=null,svCaptureActive=false,svSideLive=null;
+function svSampleFrame(){
+  if(!armed||!stream)return;
+  const now=performance.now();
+  const sources=[['front',raw],['side',svSideLive]];
+  for(const [key,v] of sources){
+    if(!v||v.readyState<2||!v.videoWidth||!v.videoHeight)continue;
+    const q=svRolling[key];
+    const last=q[q.length-1];
+    if(last&&now-last.t<SV_FRAME_STEP*.8)continue;
+    const c=document.createElement('canvas');
+    const scale=Math.min(1,640/Math.max(v.videoWidth,v.videoHeight));
+    c.width=Math.max(1,Math.round(v.videoWidth*scale));
+    c.height=Math.max(1,Math.round(v.videoHeight*scale));
+    c.getContext('2d',{alpha:false}).drawImage(v,0,0,c.width,c.height);
+    q.push({t:now,frame:c});
+    if(!svCaptureActive)while(q.length&&q[0].t<now-SV_PREROLL_MS)q.shift();
+  }
+}
+function svStartRolling(){
+  if(svCaptureInterval)return;
+  svCaptureInterval=setInterval(svSampleFrame,SV_FRAME_STEP);
+}
+async function svEncodeFrames(frames){
+  if(!frames.length)return null;
+  const canvas=document.createElement('canvas');
+  canvas.width=frames[0].frame.width;canvas.height=frames[0].frame.height;
+  const cx=canvas.getContext('2d',{alpha:false});
+  if(!canvas.captureStream||typeof MediaRecorder==='undefined')return null;
+  const videoStream=canvas.captureStream(SV_CAPTURE_FPS);
+  const formats=['video/webm;codecs=vp8','video/webm','video/mp4'];
+  const mime=formats.find(t=>MediaRecorder.isTypeSupported(t));
+  const rec=new MediaRecorder(videoStream,mime?{mimeType:mime}:undefined);
+  const pieces=[];
+  rec.ondataavailable=e=>{if(e.data.size)pieces.push(e.data)};
+  const stopped=new Promise(resolve=>rec.onstop=()=>resolve(new Blob(pieces,{type:rec.mimeType||'video/webm'})));
+  rec.start(100);
+  const tick=1000/SV_CAPTURE_FPS;
+  for(let i=0;i<frames.length;i++){
+    cx.drawImage(frames[i].frame,0,0,canvas.width,canvas.height);
+    await new Promise(r=>setTimeout(r,tick));
+  }
+  rec.stop();
+  const blob=await stopped;
+  videoStream.getTracks().forEach(t=>t.stop());
+  return blob;
+}
+function svLoadCapturedFront(blob){
+  if(!blob)return;
+  latestReplayBlob=blob;
+  if(replay.src)URL.revokeObjectURL(replay.src);
+  replay.src=URL.createObjectURL(blob);replay.loop=true;replay.muted=true;replay.load();
+  replay.onloadedmetadata=()=>{
+    if(raw.videoHeight>raw.videoWidth&&replay.videoHeight>replay.videoWidth){
+      window.svFrontRotation=0;
+      const b=document.getElementById('frontRotateBtn');if(b)b.textContent='영상회전 0°';
+    }
+    ['replayPlay','replayPause','sendA','sendB','frontJointBtn','frameBack','frameNext','speedMenuBtn','frontRotateBtn','replaySeek'].forEach(id=>{const el=$(id);if(el)el.disabled=false});
+    replay.playbackRate=window.svGetAutoReplaySpeed?window.svGetAutoReplaySpeed():0.5;
+    $('timeTotal').textContent=replay.duration.toFixed(2);
+    replay.currentTime=0;replay.play().catch(()=>{});
+    if(typeof window.svShowReplay==='function')window.svShowReplay();
+    $('result').textContent='스윙 전 1.5초 + 감지 후 3.2초';
+  };
+}
+function svStartPreRollCapture(){
+  if(svCaptureActive)return;
+  svCaptureActive=true;
+  const detectedAt=performance.now();
+  for(const key of ['front','side']){
+    const q=svRolling[key];
+    while(q.length&&q[0].t<detectedAt-SV_PREROLL_MS)q.shift();
+  }
+  setTimeout(async()=>{
+    const front=svRolling.front.slice(),side=svRolling.side.slice();
+    svRolling.front=[];svRolling.side=[];
+    svCaptureActive=false;
+    try{
+      const [frontBlob,sideBlob]=await Promise.all([svEncodeFrames(front),svEncodeFrames(side)]);
+      svLoadCapturedFront(frontBlob);
+      if(sideBlob&&typeof window.svLoadCapturedSide==='function')window.svLoadCapturedSide(sideBlob);
+    }catch(e){console.error('R6 capture',e);$('status').textContent='R6 녹화 인코딩 실패: '+(e.message||e);}
+  },SWING_CAPTURE_MS);
+}
 let latestReplayBlob=null;
 let ready=false, readyAt=0, stableSince=0, swingStarted=false, swingStartAt=0, addressLocked=false;
 let lastPose=null, lastPoseTime=0, lastWristSpeed=0;
@@ -768,10 +855,24 @@ function svPoseDisplayPoint(p){
   return {x:centerX+dx*Math.cos(rad)-dy*Math.sin(rad),
           y:centerY+dx*Math.sin(rad)+dy*Math.cos(rad)};
 }
+// Experimental LIVE overlay: measured MediaPipe wrist/elbow tracks only.
+// Never interpolate across missing or low-confidence observations.
+const svJointTrailHistory={13:[],14:[],15:[],16:[]};
+const svJointTrailLimit=900;
+const svSkeletonExposureMs=1500;
+const svSkeletonExposure=[];
+const svSkeletonPairs=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
+function svSkeletonColor(a,b){
+  if((a===11&&b===13)||(a===13&&b===15))return '255,72,72'; // anatomical left arm
+  if((a===12&&b===14)||(a===14&&b===16))return '50,145,255'; // anatomical right arm
+  return '255,255,255';
+}
+function svResetJointTrails(){
+  for(const k of [13,14,15,16])svJointTrailHistory[k].length=0;
+  svSkeletonExposure.length=0;
+}
 function drawSkeleton(lm){
   if(!lm)return;
-  // DISPLAY ONLY: scale the skeleton 120% about the detected hip midpoint.
-  // Keep the original video, MediaPipe coordinates and ADDRESS/SHOT logic intact.
   const leftHip=lm[23],rightHip=lm[24];
   const hipCenter=(leftHip&&rightHip)
     ? svPoseDisplayPoint({x:(leftHip.x+rightHip.x)/2,y:(leftHip.y+rightHip.y)/2})
@@ -781,19 +882,48 @@ function drawSkeleton(lm){
     return {x:hipCenter.x+(pt.x-hipCenter.x)*1.2,
             y:hipCenter.y+(pt.y-hipCenter.y)*1.2};
   };
-  const pairs=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
-  ctx.lineWidth=3;ctx.strokeStyle='rgba(255,255,255,.9)';
-  for(const [a,b] of pairs){
-    const p=lm[a],q=lm[b];
-    if(!p||!q||p.visibility<.35||q.visibility<.35)continue;
-    const aPos=displayPoint(p),bPos=displayPoint(q);
-    ctx.beginPath();ctx.moveTo(aPos.x,aPos.y);ctx.lineTo(bPos.x,bPos.y);ctx.stroke();
-  }
-  ctx.fillStyle='white';
+  // R7 visual-only: full-body 1.5-second exposure. Never feed trails into swing detection.
+  const now=performance.now();
+  const points={};
   for(const i of [11,12,13,14,15,16,23,24,25,26,27,28]){
-    const p=lm[i];if(!p||p.visibility<.35)continue;
-    const pt=displayPoint(p);
-    ctx.beginPath();ctx.arc(pt.x,pt.y,5,0,Math.PI*2);ctx.fill();
+    const p=lm[i];
+    if(p&&Number.isFinite(p.x)&&Number.isFinite(p.y)&&(p.visibility??1)>=.45)points[i]=displayPoint(p);
+  }
+  svSkeletonExposure.push({t:now,points});
+  while(svSkeletonExposure.length&&now-svSkeletonExposure[0].t>svSkeletonExposureMs)svSkeletonExposure.shift();
+  ctx.save();ctx.lineCap='round';ctx.lineJoin='round';
+  for(const frame of svSkeletonExposure){
+    const age=now-frame.t;
+    const alpha=Math.max(0,1-age/svSkeletonExposureMs);
+    if(alpha<=0)continue;
+    for(const [a,b] of svSkeletonPairs){
+      const p=frame.points[a],q=frame.points[b];
+      if(!p||!q)continue;
+      ctx.strokeStyle='rgba('+svSkeletonColor(a,b)+','+(0.40*alpha).toFixed(3)+')';
+      ctx.lineWidth=1.6;
+      ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(q.x,q.y);ctx.stroke();
+    }
+  }
+  for(const [a,b] of svSkeletonPairs){
+    const p=points[a],q=points[b];if(!p||!q)continue;
+    ctx.strokeStyle='rgba('+svSkeletonColor(a,b)+',.9)';
+    ctx.lineWidth=2.2;ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(q.x,q.y);ctx.stroke();
+  }
+  for(const i of [11,12,13,14,15,16,23,24,25,26,27,28]){
+    const p=points[i];if(!p)continue;
+    const color=[11,13,15].includes(i)?'255,72,72':[12,14,16].includes(i)?'50,145,255':'255,255,255';
+    ctx.fillStyle='rgba('+color+',.95)';
+    ctx.beginPath();ctx.arc(p.x,p.y,4.2,0,Math.PI*2);ctx.fill();
+  }
+  ctx.restore();
+  // R7 correction: draw only the current wrist/elbow markers.
+  // Legacy long-running point paths were overlaying the 1.5s full-body exposure.
+  for(const [i,color] of [[13,'255,72,72'],[15,'255,72,72'],[14,'50,145,255'],[16,'50,145,255']]){
+    const p=points[i];if(!p)continue;
+    ctx.save();
+    ctx.fillStyle='rgba('+color+',1)';
+    ctx.beginPath();ctx.arc(p.x,p.y,i>=15?5.5:5,0,Math.PI*2);ctx.fill();
+    ctx.restore();
   }
 }
 
@@ -850,7 +980,12 @@ function startRecording(){
 }
 
 function stopRecordingSoon(){
-  setTimeout(()=>{if(recorder&&recorder.state==='recording') recorder.stop()},SWING_CAPTURE_MS);
+  if(svStopTimer)clearTimeout(svStopTimer);
+  svStopTimer=setTimeout(()=>{
+    if(recorder&&recorder.state==='recording')recorder.stop();
+    if(typeof window.stopSideRecording==='function')window.stopSideRecording();
+    svStopTimer=null;
+  },SWING_CAPTURE_MS);
 }
 
 // ADDRESS diagnostic display only; scoring and READY thresholds are unchanged.
@@ -1018,7 +1153,7 @@ async function onResults(results){
 
   // MediaPipe 입력 자체를 90° 정상화했으므로 관절좌표를 그대로 사용한다.
   const rotated=latestLandmarks;
-  drawSkeleton(rotated);
+  // R8: no long-exposure overlay in LIVE capture; render on replay only.
 
   const analysisPose=svAddressAnalysisLandmarks(rotated);
   const m=poseMotionMetrics(analysisPose,now);
@@ -1087,6 +1222,7 @@ async function onResults(results){
         svReadyTrace.readyCount++;svReadyTrace.lastReason='READY 성공';
         addressLocked=true;
         ready=true;readyAt=now;stableSince=0;svResetAddressCandidate();
+        // READY is unlimited; rolling buffer retains only the latest 1.5 seconds.
         $('addressState').textContent='LOCK';
         $('overlay').style.display='flex';
         $('state').className='state ready';$('state').textContent='READY';
@@ -1140,8 +1276,7 @@ async function onResults(results){
       $('state').className='state impact';$('state').textContent='SWING 감지';
       $('status').textContent='골프 스윙 패턴 확인 · 영상 저장 중';
 
-      startRecording();
-      stopRecordingSoon();
+      svStartPreRollCapture();
       cooldown=true;
 
       setTimeout(()=>{
@@ -1294,6 +1429,7 @@ $('connect').onclick=async()=>{
       minTrackingConfidence:0.45
     });
     pose.onResults(onResults);
+    svStartRolling();
 
     $('connect').disabled=true;$('arm').disabled=false;$('disconnect').disabled=false;
     $('status').textContent='카메라 영상 연결됨 · 90° 정상화 관절감지 준비 완료';
@@ -1311,7 +1447,7 @@ $('connect').onclick=async()=>{
 };
 
 $('arm').onclick=()=>{
-  armed=!armed;ready=false;addressLocked=false;stableSince=0;svResetAddressCandidate();swingStarted=false;lastPose=null;lastPoseTime=0;
+  armed=!armed;if(!armed){svRolling.front=[];svRolling.side=[];}ready=false;addressLocked=false;stableSince=0;svResetAddressCandidate();swingStarted=false;lastPose=null;lastPoseTime=0;
   $('arm').textContent=armed?'스윙감지 OFF':'스윙감지 ON';
   $('state').className='state wait';
   $('addressState').textContent='OFF';$('state').textContent=armed?'사람/어드레스 대기':'대기';
@@ -1400,11 +1536,20 @@ $('disconnect').onclick=()=>{
   function svShowLive(){
     const wrap=document.querySelector('.wrap');if(!wrap)return;
     wrap.classList.add('live-first-mode');wrap.classList.remove('replay-mode');
+    // Force replay-only overlays off and clear their pixels during camera LIVE.
+    for(const id of ['frontJointCanvas','sideJointCanvas']){
+      const c=byId(id);if(!c)continue;
+      c.style.setProperty('display','none','important');
+      c.getContext('2d')?.clearRect(0,0,c.width,c.height);
+    }
     setTimeout(()=>{ if(typeof window.fitLiveStageInsideViewport==='function') window.fitLiveStageInsideViewport(); },30);
   }
   function svShowReplay(){
     const wrap=document.querySelector('.wrap');if(!wrap)return;
     wrap.classList.remove('live-first-mode');wrap.classList.add('replay-mode');
+    for(const id of ['frontJointCanvas','sideJointCanvas']){
+      const c=byId(id);if(c){c.style.removeProperty('display');c.style.setProperty('display','block','important');}
+    }
     if(typeof applyCameraLayout==='function')applyCameraLayout();
   }
 
@@ -1494,7 +1639,7 @@ $('disconnect').onclick=()=>{
       <button id="sidePause" class="dark" disabled>정지</button>
       <button id="sideSendA" class="green" disabled>A화면 보내기</button>
       <button id="sideSendB" class="green" disabled>B화면 보내기</button>
-      <button id="sideJointBtn" class="dark" disabled>관절보기 OFF</button>
+      <button id="sideJointBtn" class="dark" disabled>관절 OFF</button>
       <button id="sideFrameBack" class="white" disabled>◀1F</button>
       <button id="sideFrameNext" class="white" disabled>1F▶</button>
       <select id="sideSpeed" class="white" disabled>
@@ -1511,6 +1656,9 @@ $('disconnect').onclick=()=>{
     </div>
     <div id="sideResult" class="status">측면 카메라 연결 대기</div>`;
   frontPanel.insertAdjacentElement('afterend',side);
+  // Initial svShowLive can run before replay canvases are created.
+  // Apply the LIVE visibility guard again after both canvases exist.
+  if(document.querySelector('.wrap')?.classList.contains('live-first-mode'))svShowLive();
 
   byId('liveViewBtn')?.addEventListener('click',()=>{
     svShowLive();
@@ -1697,6 +1845,8 @@ $('disconnect').onclick=()=>{
         return false;
       }
 
+      if(!svSideLive){svSideLive=document.createElement('video');svSideLive.muted=true;svSideLive.playsInline=true;}
+      svSideLive.srcObject=sideStream;await svSideLive.play();
       wrap.classList.add('dual-camera-active');
       byId('sideResult').textContent='CAM2 연결 확인 · 정면/측면 50:50 자동 전환';
       return true;
@@ -1726,7 +1876,23 @@ $('disconnect').onclick=()=>{
     if(wrap) wrap.classList.remove('dual-camera-active');
   },true);
 
+  window.svLoadCapturedSide=function(blob){
+    latestSideBlob=blob;
+    if(sideReplay.src)URL.revokeObjectURL(sideReplay.src);
+    sideReplay.src=URL.createObjectURL(blob);sideReplay.loop=true;sideReplay.muted=true;sideReplay.load();
+    sideReplay.onloadedmetadata=()=>{
+      ['sidePlay','sidePause','sideSendA','sideSendB','sideJointBtn','sideFrameBack','sideFrameNext','sideSpeed','sideRotateBtn','sideSeek'].forEach(id=>{const el=byId(id);if(el)el.disabled=false});
+      byId('sideTimeTotal').textContent=(sideReplay.duration||0).toFixed(2);
+      sideReplay.currentTime=0;
+      sideReplay.playbackRate=window.svGetAutoReplaySpeed?window.svGetAutoReplaySpeed():0.5;
+      sideReplay.play().catch(()=>{});
+      byId('sideResult').textContent='측면 스윙 전 1.5초 + 감지 후 3.2초';
+    };
+  };
   /* ---------- 정면 트리거와 동시에 측면 녹화 ---------- */
+  window.stopSideRecording=function(){
+    if(sideRecorder&&sideRecorder.state==='recording')sideRecorder.stop();
+  };
   window.startSideRecording=function(){
     if(!sideStream || sideRecorder?.state==='recording') return;
     sideChunks=[];
@@ -1754,9 +1920,7 @@ $('disconnect').onclick=()=>{
       };
     };
     sideRecorder.start(100);
-    setTimeout(()=>{
-      if(sideRecorder && sideRecorder.state==='recording') sideRecorder.stop();
-    },3200);
+    // The front camera ends both recordings after the detected swing.
   };
 
   /* ---------- 측면 리플레이: cover + 원본비율 유지 ---------- */
@@ -1833,12 +1997,14 @@ $('disconnect').onclick=()=>{
   byId('frontRotateBtn').onclick=()=>{
     window.svFrontRotation=(window.svFrontRotation+90)%360;
     byId('frontRotateBtn').textContent='영상회전 '+window.svFrontRotation+'°';
+    resetReplayTrails('front');
     clearJointCanvas('front');
   };
 
   byId('sideRotateBtn').onclick=()=>{
     window.svSideRotation=(window.svSideRotation+90)%360;
     byId('sideRotateBtn').textContent='영상회전 '+window.svSideRotation+'°';
+    resetReplayTrails('side');
     clearJointCanvas('side');
   };
 
@@ -1852,33 +2018,160 @@ $('disconnect').onclick=()=>{
       modelComplexity:1,smoothLandmarks:true,enableSegmentation:false,
       minDetectionConfidence:0.45,minTrackingConfidence:0.45
     });
-    p.onResults(res=>drawReplayJoints(which,res.poseLandmarks||null));
+    p.onResults(res=>{
+      const landmarks=res.poseLandmarks||null;
+      const status=byId(which==='front'?'result':'sideResult');
+      if(status && (which==='front'?frontJointOn:sideJointOn)){
+        status.textContent=landmarks?'관절 분석: 좌표 '+landmarks.length+'개 수신':'관절 분석: 인체 좌표 미검출';
+      }
+      drawReplayJoints(which,landmarks);
+    });
     if(isFront) frontReplayPose=p; else sideReplayPose=p;
     return p;
   }
 
+  // Replay trails are built exclusively from observed MediaPipe landmarks.
+  const replayTrailData={front:{13:[],14:[],15:[],16:[]},side:{13:[],14:[],15:[],16:[]}};
+  const replayTrailLastTime={front:-1,side:-1};
+  const replaySkeletonHistory={front:[],side:[]};
+  const replaySwingPathHistory={front:[],side:[]};
+  function resetReplayTrails(which){
+    for(const i of [13,14,15,16])replayTrailData[which][i].length=0;
+    replayTrailLastTime[which]=-1;
+    replaySkeletonHistory[which].length=0;
+    replaySwingPathHistory[which].length=0;
+  }
   function drawReplayJoints(which,lm){
     const c=which==='front'?frontJointCanvas:sideJointCanvas;
     const stage=which==='front'?frontStage:byId('sideVideoStage');
-    if(!c||!stage) return;
+    const video=which==='front'?byId('replay'):sideReplay;
+    if(!c||!stage||!video)return;
     const r=stage.getBoundingClientRect();
-    const w=Math.max(1,Math.round(r.width)), h=Math.max(1,Math.round(r.height));
-    if(c.width!==w||c.height!==h){c.width=w;c.height=h;}
+    const w=Math.max(1,Math.round(r.width)),h=Math.max(1,Math.round(r.height));
+    if(c.width!==w||c.height!==h){c.width=w;c.height=h;resetReplayTrails(which);}
     const x=c.getContext('2d');
     x.clearRect(0,0,w,h);
-    if(!lm) return;
-
-    // MediaPipe 입력은 아래 jointLoop에서 90° 정상화된 캔버스이므로 좌표 그대로 사용.
+    const time=video.currentTime||0;
+    if(replayTrailLastTime[which]>=0 && time<replayTrailLastTime[which]-.06)resetReplayTrails(which);
+    if(!lm){
+      for(const i of [13,14,15,16]){
+        const hist=replayTrailData[which][i];
+        if(!hist.length||Math.abs(time-hist[hist.length-1].t)>.008)hist.push({t:time,valid:false});
+        if(hist.length>1200)hist.shift();
+      }
+      replayTrailLastTime[which]=time;
+      return;
+    }
+    replayTrailLastTime[which]=time;
+    // Match the video's contain-fit image area, not the whole stage.
+    const inputW=(which==='front'?frontJointInput:sideJointInput).width;
+    const inputH=(which==='front'?frontJointInput:sideJointInput).height;
+    const scale=Math.min(w/inputW,h/inputH);
+    const imageX=(w-inputW*scale)/2,imageY=(h-inputH*scale)/2;
+    // 0.8-second replay exposure; arm distinction applies to elbow/wrist dots only.
+    // Coordinates are projected into the displayed contain-fit video rectangle.
+    const project=p=>({x:imageX+p.x*inputW*scale,y:imageY+p.y*inputH*scale});
     const pairs=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]];
-    x.lineWidth=3;x.strokeStyle='rgba(255,255,255,.95)';x.fillStyle='#fff';
+    const pts={};
+    for(const i of [11,12,13,14,15,16,23,24,25,26,27,28]){
+      const p=lm[i];
+      if(p&&Number.isFinite(p.x)&&Number.isFinite(p.y)&&(p.visibility??1)>=.45)pts[i]=project(p);
+    }
+    const hist=replaySkeletonHistory[which];
+    if(!hist.length||Math.abs(hist[hist.length-1].t-time)>.008)hist.push({t:time,pts});
+    while(hist.length&&time-hist[0].t>.8)hist.shift();
+    x.save();x.lineCap='round';x.lineJoin='round';
+    // Keep faint whole-body exposure as context, rather than dense white spokes.
+    for(const frame of hist){
+      const alpha=Math.max(0,1-(time-frame.t)/.8);
+      if(alpha<=0)continue;
+      for(const [a,b] of pairs){
+        const p=frame.pts[a],q=frame.pts[b];if(!p||!q)continue;
+        x.strokeStyle='rgba(255,255,255,'+(alpha*.075).toFixed(3)+')';
+        x.lineWidth=1;x.beginPath();x.moveTo(p.x,p.y);x.lineTo(q.x,q.y);x.stroke();
+      }
+    }
+    // Scatter exposure: particles are anchored to observed pose samples only.
+    // Deterministic small offsets avoid changing position when a frame redraws.
+    const trailColors={13:'255,165,0',15:'255,72,72',14:'48,205,94',16:'50,145,255'};
+    for(const i of [13,15,14,16]){
+      let sample=0;
+      for(const frame of hist){
+        const p=frame.pts[i];
+        if(!p){sample++;continue;}
+        const age=time-frame.t;
+        const alpha=Math.max(0,1-age/.8);
+        if(alpha<=0){sample++;continue;}
+        // One center particle and two subtle satellites, not interpolated dots.
+        for(let k=0;k<3;k++){
+          const seed=sample*12.9898+i*78.233+k*37.719;
+          const angle=(Math.sin(seed)*43758.5453%1+1)%1*Math.PI*2;
+          const spread=k===0?0:(k===1?5.5:9);
+          const px=p.x+Math.cos(angle)*spread;
+          const py=p.y+Math.sin(angle)*spread;
+          const radius=k===0?2.6:(k===1?1.9:1.4);
+          x.fillStyle='rgba('+trailColors[i]+','+((k===0?.82:.48)*alpha).toFixed(3)+')';
+          x.beginPath();x.arc(px,py,radius,0,Math.PI*2);x.fill();
+        }
+        sample++;
+      }
+    }
+    // Baseline 2: add the measured line effect only when enabled.
+    if(window.svJointLineEnabled===true){
+    const pathFrames=replaySwingPathHistory[which];
+    if(!pathFrames.length||Math.abs(time-pathFrames[pathFrames.length-1].t)>.008){
+      pathFrames.push({t:time,pts:{13:pts[13],14:pts[14],15:pts[15],16:pts[16]}});
+    }
+    while(pathFrames.length&&time-pathFrames[0].t>8)pathFrames.shift();
+    for(const i of [13,15,14,16]){
+      // Replay poses are sampled much more sparsely than the original LIVE
+      // camera stream. Preserve a valid measured path across normal gaps.
+      const maxJump=Math.max(45,Math.min(w,h)*.30);
+      let prev=null,run=[];const runs=[];
+      for(const frame of pathFrames){
+        const p=frame.pts[i];
+        if(!p){if(run.length)runs.push(run);run=[];prev=null;continue;}
+        if(prev){
+          const dt=frame.t-prev.t;
+          if(dt<=0||dt>.45||Math.hypot(p.x-prev.x,p.y-prev.y)>maxJump){
+            if(run.length)runs.push(run);
+            run=[];prev=null;
+          }
+        }
+        const smooth=prev?{x:prev.x*.60+p.x*.40,y:prev.y*.60+p.y*.40,t:frame.t}:{x:p.x,y:p.y,t:frame.t};
+        run.push(smooth);prev=smooth;
+      }
+      if(run.length)runs.push(run);
+      for(const segment of runs){
+        x.save();x.lineCap='round';x.lineJoin='round';
+        x.strokeStyle='rgba('+trailColors[i]+',.88)';
+        x.lineWidth=1.4;
+        if(segment.length>1){
+          x.beginPath();x.moveTo(segment[0].x,segment[0].y);
+          for(let k=1;k<segment.length;k++)x.lineTo(segment[k].x,segment[k].y);
+          x.stroke();
+        }
+        // Visible dots at observed positions, even when tracking breaks.
+        for(const p of segment){
+          x.fillStyle='rgba('+trailColors[i]+',.96)';
+          x.beginPath();x.arc(p.x,p.y,3.1,0,Math.PI*2);x.fill();
+        }
+        x.restore();
+      }
+    }
+    }
     for(const [a,b] of pairs){
-      const p=lm[a],q=lm[b]; if(!p||!q||(p.visibility||0)<.3||(q.visibility||0)<.3)continue;
-      x.beginPath();x.moveTo(p.x*w,p.y*h);x.lineTo(q.x*w,q.y*h);x.stroke();
+      const p=pts[a],q=pts[b];if(!p||!q)continue;
+      x.strokeStyle='rgba(255,255,255,.85)';
+      x.lineWidth=1.7;x.beginPath();x.moveTo(p.x,p.y);x.lineTo(q.x,q.y);x.stroke();
     }
     for(const i of [11,12,13,14,15,16,23,24,25,26,27,28]){
-      const p=lm[i];if(!p||(p.visibility||0)<.3)continue;
-      x.beginPath();x.arc(p.x*w,p.y*h,5,0,Math.PI*2);x.fill();
+      const p=pts[i];if(!p)continue;
+      const rgb=trailColors[i]||'255,255,255';
+      x.fillStyle='rgba('+rgb+',.98)';
+      x.beginPath();x.arc(p.x,p.y,i===15||i===16?5:4,0,Math.PI*2);x.fill();
     }
+    x.restore();
   }
 
   const frontJointInput=document.createElement('canvas');
@@ -1913,16 +2206,22 @@ $('disconnect').onclick=()=>{
     const now=performance.now();
     if(frontJointOn && !frontPoseBusy && now-frontLastPoseAt>90){
       frontPoseBusy=true;frontLastPoseAt=now;
-      try{await processReplayPose('front');}catch(e){}finally{frontPoseBusy=false;}
+      try{await processReplayPose('front');}catch(e){const st=byId('result');if(st)st.textContent='관절 분석 오류: '+(e.message||String(e));console.error('front replay pose',e);}finally{frontPoseBusy=false;}
     }
     if(sideJointOn && !sidePoseBusy && now-sideLastPoseAt>90){
       sidePoseBusy=true;sideLastPoseAt=now;
-      try{await processReplayPose('side');}catch(e){}finally{sidePoseBusy=false;}
+      try{await processReplayPose('side');}catch(e){const st=byId('sideResult');if(st)st.textContent='측면 관절 분석 오류: '+(e.message||String(e));console.error('side replay pose',e);}finally{sidePoseBusy=false;}
     }
     requestAnimationFrame(jointLoop);
   }
   jointLoop();
 
+  for(const [which,video] of [['front',byId('replay')],['side',sideReplay]]){
+    if(!video)continue;
+    for(const event of ['seeking','loadedmetadata','emptied']){
+      video.addEventListener(event,()=>{resetReplayTrails(which);clearJointCanvas(which);});
+    }
+  }
   function clearJoint(which){
     const c=which==='front'?frontJointCanvas:sideJointCanvas;
     if(c) c.getContext('2d').clearRect(0,0,c.width,c.height);
@@ -1930,14 +2229,23 @@ $('disconnect').onclick=()=>{
 
   byId('frontJointBtn').onclick=()=>{
     frontJointOn=!frontJointOn;
-    byId('frontJointBtn').textContent='관절보기 '+(frontJointOn?'ON':'OFF');
+    if(frontJointOn && document.querySelector('.wrap')?.classList.contains('replay-mode')){
+      frontJointCanvas?.style.setProperty('display','block','important');
+    }
+    byId('frontJointBtn').textContent='관절 '+(frontJointOn?'ON':'OFF');
     byId('frontJointBtn').classList.toggle('jointOn',frontJointOn);
+    resetReplayTrails('front');
+    if(frontJointOn){const st=byId('result');if(st)st.textContent='관절 분석 시작 · 영상 프레임 확인 중';}
     if(!frontJointOn) clearJoint('front');
   };
   byId('sideJointBtn').onclick=()=>{
     sideJointOn=!sideJointOn;
-    byId('sideJointBtn').textContent='관절보기 '+(sideJointOn?'ON':'OFF');
+    if(sideJointOn && document.querySelector('.wrap')?.classList.contains('replay-mode')){
+      sideJointCanvas?.style.setProperty('display','block','important');
+    }
+    byId('sideJointBtn').textContent='관절 '+(sideJointOn?'ON':'OFF');
     byId('sideJointBtn').classList.toggle('jointOn',sideJointOn);
+    resetReplayTrails('side');
     if(!sideJointOn) clearJoint('side');
   };
 
@@ -2737,14 +3045,14 @@ background:#34493f;color:#fff;font:700 12px Arial,sans-serif;white-space:nowrap}
   if(!bar||document.getElementById('svTrailToggle'))return;
   const btn=document.createElement('button');
   btn.id='svTrailToggle';btn.type='button';
-  btn.textContent='궤적보기 OFF';btn.setAttribute('aria-pressed','false');
-  btn.title='클럽헤드 궤적 표시 설정 (자동 검출 기능 준비 중)';
-  window.svClubTrailVisible=false;
+  btn.textContent='궤적 OFF';btn.setAttribute('aria-pressed','false');
+  btn.title='관절 점 효과에 궤적선 추가/제거';
+  window.svJointLineEnabled=false;
   btn.addEventListener('click',()=>{
-    window.svClubTrailVisible=!window.svClubTrailVisible;
-    btn.setAttribute('aria-pressed',String(window.svClubTrailVisible));
-    btn.textContent='궤적보기 '+(window.svClubTrailVisible?'ON':'OFF');
-    document.dispatchEvent(new CustomEvent('sv-club-trail-visibility',{detail:{visible:window.svClubTrailVisible}}));
+    window.svJointLineEnabled=!window.svJointLineEnabled;
+    btn.setAttribute('aria-pressed',String(window.svJointLineEnabled));
+    btn.textContent='궤적 '+(window.svJointLineEnabled?'ON':'OFF');
+    document.dispatchEvent(new CustomEvent('sv-club-trail-visibility',{detail:{visible:window.svJointLineEnabled}}));
   });
   const anchor=document.getElementById('frontJointBtn');
   if(anchor&&anchor.parentElement===bar)anchor.insertAdjacentElement('afterend',btn);
