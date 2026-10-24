@@ -1260,7 +1260,21 @@ $('connect').onclick=async()=>{
       : {facingMode:{exact:'user'},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}};
     $('status').textContent='카메라 권한을 요청하는 중입니다. 브라우저 권한 창에서 허용을 눌러주세요.';
     // Never silently switch a requested front camera to the rear camera.
-    stream=await navigator.mediaDevices.getUserMedia({video:videoConstraints,audio:false});
+    try {
+      stream=await navigator.mediaDevices.getUserMedia({video:videoConstraints,audio:false});
+    } catch (cameraError) {
+      if (cameraError?.name !== 'OverconstrainedError') throw cameraError;
+      // PC webcam compatibility: relax constraints only after the original request fails.
+      const relaxedVideo = selectedCamera
+        ? {deviceId:{ideal:selectedCamera},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}}
+        : {facingMode:{ideal:'user'},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}};
+      try {
+        stream=await navigator.mediaDevices.getUserMedia({video:relaxedVideo,audio:false});
+      } catch (retryError) {
+        if (retryError?.name !== 'OverconstrainedError') throw retryError;
+        stream=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
+      }
+    }
     raw.srcObject=stream;
     raw.style.display='block';
     await raw.play();
