@@ -25,7 +25,7 @@ public class AndroidSmokeTest {
     private String js(String source)throws Exception{
         CountDownLatch latch=new CountDownLatch(1);AtomicReference<String> result=new AtomicReference<>();
         scenario.onActivity(a->find(a.getWindow().getDecorView()).evaluateJavascript(source,r->{result.set(r);latch.countDown();}));
-        assertTrue("JavaScript callback timed out",latch.await(15,TimeUnit.SECONDS));return result.get();
+        assertTrue("JavaScript callback timed out",latch.await(60,TimeUnit.SECONDS));return result.get();
     }
     private void until(String expression,int seconds)throws Exception{
         long end=System.currentTimeMillis()+seconds*1000L;String result="";
@@ -37,12 +37,16 @@ public class AndroidSmokeTest {
         assertEquals("true",js("isSecureContext && !!navigator.mediaDevices.getUserMedia"));
         js("document.getElementById('connect').click();true");
         until("typeof stream!=='undefined' && !!stream && raw.videoWidth>0",60);
+        System.out.println("SV_SMOKE_STAGE=camera-connected");
         // Model callback proves the unchanged model runs, not that a golfer was detected.
         until("typeof lastPoseRenderAt!=='undefined' && lastPoseRenderAt>0",120);
+        System.out.println("SV_SMOKE_STAGE=model-callback");
         js("window.__smokeError='';(async()=>{try{const r=new MediaRecorder(stream,{mimeType:'video/webm'}),parts=[];r.ondataavailable=e=>{if(e.data.size)parts.push(e.data)};r.onstop=()=>svLoadCapturedFront(new Blob(parts,{type:'video/webm'}));r.start(100);setTimeout(()=>r.stop(),2000);}catch(e){window.__smokeError=e.message;}})();true");
         until("!!latestReplayBlob && latestReplayBlob.size>0 && replay.videoWidth>0",30);
+        System.out.println("SV_SMOKE_STAGE=replay-ready");
         js("document.getElementById('svMobileSaveBtn').disabled=false;document.getElementById('svMobileSaveBtn').click();true");
         until("document.getElementById('svMobileSaveStatus').textContent.includes('Movies/SV MOBILE')",60);
+        System.out.println("SV_SMOKE_STAGE=native-save-complete");
         AtomicReference<String> saved=new AtomicReference<>();
         scenario.onActivity(a->{try(Cursor c=a.getContentResolver().query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,new String[]{MediaStore.Video.Media.SIZE,MediaStore.Video.Media.IS_PENDING},MediaStore.Video.Media.RELATIVE_PATH+"=?",new String[]{"Movies/SV MOBILE/"},MediaStore.Video.Media.DATE_ADDED+" DESC")){
             assertNotNull(c);assertTrue(c.moveToFirst());assertTrue(c.getLong(0)>0);assertEquals(0,c.getInt(1));saved.set("saved");

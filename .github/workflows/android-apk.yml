@@ -78,7 +78,7 @@ jobs:
           arch: x86_64
           target: google_apis
           profile: pixel_2
-          emulator-options: -no-window -gpu software -no-snapshot -memory 2048 -cores 2 -noaudio -no-boot-anim -camera-back emulated -camera-front emulated
+          emulator-options: -no-window -gpu software -no-snapshot -memory 4096 -cores 2 -noaudio -no-boot-anim -camera-back emulated -camera-front emulated
           disable-animations: true
           working-directory: androidapp
           script: bash ../scripts/android-smoke.sh
