@@ -796,130 +796,6 @@ function poseMotionMetrics(lm, now){
   return {stability,handSpeed,shoulderTurn,pelvisSpeed,ankleSpeed};
 }
 
-function svStrictFullAddress(lm){
-  if(!lm)return false;
-
-  // Reference V9 / V11.1B style landmarks
-  const needed=[11,12,15,16,23,24,25,26,27,28];
-  for(const i of needed){
-    const p=lm[i];
-    if(!p || (p.visibility!=null && p.visibility<0.20))return false;
-  }
-
-  const ls=lm[11], rs=lm[12], lh=lm[23], rh=lm[24];
-  const lk=lm[25], rk=lm[26], la=lm[27], ra=lm[28];
-  const lw=lm[15], rw=lm[16];
-
-  const shoulderMid={x:(ls.x+rs.x)/2,y:(ls.y+rs.y)/2};
-  const hipMid={x:(lh.x+rh.x)/2,y:(lh.y+rh.y)/2};
-  const kneeMid={x:(lk.x+rk.x)/2,y:(lk.y+rk.y)/2};
-  const ankleMid={x:(la.x+ra.x)/2,y:(la.y+ra.y)/2};
-  const handMid={x:(lw.x+rw.x)/2,y:(lw.y+rw.y)/2};
-
-  const torsoLen=Math.max(0.001,dist(shoulderMid,hipMid));
-  const shoulderWidth=Math.max(0.001,dist(ls,rs));
-  const feetGap=Math.abs(la.x-ra.x);
-  const kneeGap=Math.abs(lk.x-rk.x);
-  const handGap=dist(lw,rw);
-  const handBelowShoulders=(handMid.y-shoulderMid.y)/torsoLen;
-  const handFromHips=Math.abs(handMid.y-hipMid.y)/torsoLen;
-  const handCenterX=Math.abs(handMid.x-hipMid.x)/shoulderWidth;
-  const gripGap=handGap/shoulderWidth;
-  const stanceRatio=feetGap/shoulderWidth;
-  const hipToKnee=Math.max(0.001,dist(hipMid,kneeMid));
-  const kneeToAnkle=Math.max(0.001,dist(kneeMid,ankleMid));
-  const bodyCentered=hipMid.x>0.18 && hipMid.x<0.82;
-
-  const hipLevelDiff=Math.abs(lh.y-rh.y);
-  const kneeLevelDiff=Math.abs(lk.y-rk.y);
-  const ankleLevelDiff=Math.abs(la.y-ra.y);
-
-  const obviousOneLeg =
-    (hipLevelDiff>0.070 && kneeLevelDiff>0.080) ||
-    (kneeLevelDiff>0.105) ||
-    (ankleLevelDiff>0.095 && hipLevelDiff>0.050);
-
-  /* V64 FALSE-READY FIX
-     The previous 5-of-7 score was too permissive: a standing person could pass.
-     A golf address must now include the grip geometry itself:
-       - both wrists close together relative to shoulder width,
-       - grip located near the body's center line,
-       - stance width plausible relative to shoulder width.
-     These are mandatory gates, not optional score points.
-     Existing backswing/downswing/shot thresholds are intentionally unchanged. */
-  const gripLocked=(gripGap<=0.58 && handCenterX<=0.52);
-  const stanceLocked=(stanceRatio>=0.58 && stanceRatio<=2.05);
-  const handsInAddressZone=(handBelowShoulders>=0.72 && handBelowShoulders<=2.35 && handFromHips<=1.25);
-  const legsVisibleStable=(hipToKnee>=0.13 && kneeToAnkle>=0.13);
-
-  return !!(
-    bodyCentered &&
-    gripLocked &&
-    stanceLocked &&
-    handsInAddressZone &&
-    legsVisibleStable &&
-    kneeGap>=0.04 && kneeGap<=0.34 &&
-    !obviousOneLeg
-  );
-}
-
-function svStrictApproachAddress(lm){
-  if(!lm)return false;
-  const needed=[11,12,15,16,23,24,25,26,27,28];
-  for(const i of needed){
-    const p=lm[i];
-    if(!p || (p.visibility!=null && p.visibility<0.20))return false;
-  }
-
-  const ls=lm[11], rs=lm[12], lh=lm[23], rh=lm[24];
-  const lk=lm[25], rk=lm[26], la=lm[27], ra=lm[28];
-  const lw=lm[15], rw=lm[16];
-  const shoulderMid={x:(ls.x+rs.x)/2,y:(ls.y+rs.y)/2};
-  const hipMid={x:(lh.x+rh.x)/2,y:(lh.y+rh.y)/2};
-  const kneeMid={x:(lk.x+rk.x)/2,y:(lk.y+rk.y)/2};
-  const ankleMid={x:(la.x+ra.x)/2,y:(la.y+ra.y)/2};
-  const handMid={x:(lw.x+rw.x)/2,y:(lw.y+rw.y)/2};
-
-  const torsoLen=Math.max(0.001,dist(shoulderMid,hipMid));
-  const shoulderWidth=Math.max(0.001,dist(ls,rs));
-  const feetGap=Math.abs(la.x-ra.x);
-  const kneeGap=Math.abs(lk.x-rk.x);
-  const handGap=dist(lw,rw);
-  const gripGap=handGap/shoulderWidth;
-  const handCenterX=Math.abs(handMid.x-hipMid.x)/shoulderWidth;
-  const stanceRatio=feetGap/shoulderWidth;
-  const handBelowShoulders=(handMid.y-shoulderMid.y)/torsoLen;
-  const handFromHips=Math.abs(handMid.y-hipMid.y)/torsoLen;
-  const hipToKnee=Math.max(0.001,dist(hipMid,kneeMid));
-  const kneeToAnkle=Math.max(0.001,dist(kneeMid,ankleMid));
-
-  const hipLevelDiff=Math.abs(lh.y-rh.y);
-  const kneeLevelDiff=Math.abs(lk.y-rk.y);
-  const ankleLevelDiff=Math.abs(la.y-ra.y);
-  const obviousOneLeg=
-    (hipLevelDiff>0.070 && kneeLevelDiff>0.080) ||
-    kneeLevelDiff>0.105 ||
-    (ankleLevelDiff>0.095 && hipLevelDiff>0.050);
-
-  /* Approach allows the naturally narrower stance, but keeps grip/body gates strict
-     so a person merely standing in front of the camera cannot create READY. */
-  return !!(
-    hipMid.x>0.18 && hipMid.x<0.82 &&
-    gripGap<=0.54 && handCenterX<=0.50 &&
-    stanceRatio>=0.30 && stanceRatio<0.72 &&
-    handBelowShoulders>=0.72 && handBelowShoulders<=2.35 &&
-    handFromHips<=1.25 &&
-    hipToKnee>=0.13 && kneeToAnkle>=0.13 &&
-    kneeGap>=0.025 && kneeGap<=0.30 &&
-    !obviousOneLeg
-  );
-}
-
-function svStrictAddressMode(lm){
-  if(!lm||[11,12,15,16,23,24,25,26,27,28].some(i=>!lm[i]||!Number.isFinite(lm[i].x)||!Number.isFinite(lm[i].y)||lm[i].x<0||lm[i].x>1||lm[i].y<0||lm[i].y>1))return null;
-  return svStrictFullAddress(lm)?'full':svStrictApproachAddress(lm)?'approach':null;
-}
-
 function addressSimilarity(lm){
   if(!lm) return {ok:false,score:0};
   const needed=[11,12,15,16,23,24,25,26,27,28];
@@ -983,8 +859,7 @@ function addressSimilarity(lm){
   ];
   // 기존 V11.1 계열처럼 7개 중 5개 이상이면 어드레스 후보.
   // 단, 명확한 짝다리로 판단되면 ADDRESS로 인정하지 않는다.
-  const strictMode=svStrictAddressMode(lm);
-  return {ok:(score>=5 && !obviousOneLeg && !!strictMode),score,obviousOneLeg,checks,strictMode};
+  return {ok:(score>=5 && !obviousOneLeg),score,obviousOneLeg,checks};
 }
 
 
@@ -1441,7 +1316,7 @@ async function onResults(results){
         $('state').textContent='짝다리/하체 비대칭 · 일반동작';
         $('status').textContent='명확한 짝다리 자세는 ADDRESS로 인정하지 않습니다.';
       }else{
-        $('state').textContent=isAddress?'어드레스 유사 · 안정 대기':addressCheck.score>=5?'그립·손 위치·스탠스 재확인':'일반동작 · 어드레스 대기';
+        $('state').textContent=isAddress?'어드레스 유사 · 안정 대기':'일반동작 · 어드레스 대기';
         $('status').textContent='ADDRESS LOCK 전에는 어떤 움직임도 스윙으로 판단하지 않습니다.';
       }
     }
