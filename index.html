@@ -1254,7 +1254,7 @@ async function onResults(results){
       [hip.x,hip.y,ankle.x,ankle.y].every(Number.isFinite) &&
       hip.x>=0 && hip.x<=1 && hip.y>=0 && hip.y<=1 &&
       ankle.x>=0 && ankle.x<=1 && ankle.y>=0 && ankle.y<=1;
-    if(!validGeometry){if(addressCheck.score<5)svReadyTrace.rejected.score++;else if(addressCheck.obviousOneLeg)svReadyTrace.rejected.oneLeg++;else svReadyTrace.rejected.coordinates++;}
+    if(!validGeometry){if(addressCheck.score<7)svReadyTrace.rejected.score++;else if(addressCheck.obviousOneLeg)svReadyTrace.rejected.oneLeg++;else svReadyTrace.rejected.coordinates++;}
     if(validGeometry){
       if(!svAddressCandidateSince){
         svReadyTrace.candidates++;
