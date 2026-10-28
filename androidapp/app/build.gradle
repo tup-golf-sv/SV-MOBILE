@@ -1,11 +1,11 @@
 plugins { id 'com.android.application' }
 android {
     namespace 'kr.co.tupgolf.svmobile'
-    compileSdk 35
+    compileSdk 36
     defaultConfig {
         applicationId 'kr.co.tupgolf.svmobile'
         minSdk 29
-        targetSdk 35
+        targetSdk 36
         versionCode 2
         versionName '0.2.0-dev'
         buildConfigField 'String', 'API_BASE', '"' + (System.getenv('SV_API_BASE') ?: '') + '"'
@@ -22,6 +22,8 @@ dependencies {
 // Package the existing web app byte-for-byte. Production index.html is never edited.
 tasks.register('syncWebApp', Copy) {
     from rootProject.file('../index.html')
+    from rootProject.file('../manifest.webmanifest')
+    from rootProject.file('../sv-mobile-icon.svg')
     into 'src/main/assets'
 }
 preBuild.dependsOn syncWebApp

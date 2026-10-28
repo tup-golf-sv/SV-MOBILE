@@ -8,3 +8,7 @@ __pycache__/
 .pytest_cache/
 server/data/
 androidapp/app/src/main/assets/index.html
+androidapp/app/src/main/assets/manifest.webmanifest
+androidapp/app/src/main/assets/sv-mobile-icon.svg
+androidapp/android-evidence/
+androidapp/ci-artifacts/

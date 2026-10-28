@@ -31,6 +31,7 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
+        root.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets;});
         LinearLayout toolbar=new LinearLayout(this);
         Button account=new Button(this);account.setText("Pro · 계정 / 복원");account.setOnClickListener(v->pro.show());
         proStatus=new TextView(this);proStatus.setText("무료 기능 사용 가능");toolbar.addView(account);toolbar.addView(proStatus);root.addView(toolbar);

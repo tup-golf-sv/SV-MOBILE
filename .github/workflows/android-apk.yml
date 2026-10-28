@@ -1,7 +1,5 @@
 name: Android APK build
 on:
-  push:
-    branches: [android-release-build]
   workflow_dispatch:
   pull_request:
     branches: [main]
@@ -22,10 +20,10 @@ jobs:
       - name: Use installed Android SDK
         run: |
           SDKMGR=$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | head -n 1)
-          "$SDKMGR" --install 'platforms;android-35' 'build-tools;35.0.0' 
+          "$SDKMGR" --install 'platforms;android-36' 'build-tools;35.0.0' 
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.10.2'
+          gradle-version: '8.11.1'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -49,6 +47,7 @@ jobs:
           name: sv-mobile-debug-apk
           path: |
             androidapp/app/build/outputs/apk/debug/*
+            androidapp/app/build/outputs/apk/androidTest/debug/*.apk
             androidapp/app/build/outputs/bundle/release/*.aab
             androidapp/app/build/reports/lint-results-debug.html
   android-smoke:
@@ -63,7 +62,11 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.10.2'
+          gradle-version: '8.11.1'
+      - uses: actions/download-artifact@v4
+        with:
+          name: sv-mobile-debug-apk
+          path: androidapp/ci-artifacts
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -71,18 +74,17 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: 36
           arch: x86_64
           target: google_apis
           profile: pixel_2
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back emulated -camera-front emulated
+          emulator-options: -no-window -gpu software -no-snapshot -memory 2048 -cores 2 -noaudio -no-boot-anim -camera-back emulated -camera-front emulated
           disable-animations: true
           working-directory: androidapp
-          script: gradle --no-daemon connectedDebugAndroidTest
+          script: bash ../scripts/android-smoke.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: android-emulator-test-results
           path: |
-            androidapp/app/build/reports/androidTests/
-            androidapp/app/build/outputs/androidTest-results/
+            androidapp/android-evidence/

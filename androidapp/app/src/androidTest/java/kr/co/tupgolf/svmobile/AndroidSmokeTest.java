@@ -47,6 +47,9 @@ public class AndroidSmokeTest {
         scenario.onActivity(a->{try(Cursor c=a.getContentResolver().query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,new String[]{MediaStore.Video.Media.SIZE,MediaStore.Video.Media.IS_PENDING},MediaStore.Video.Media.RELATIVE_PATH+"=?",new String[]{"Movies/SV MOBILE/"},MediaStore.Video.Media.DATE_ADDED+" DESC")){
             assertNotNull(c);assertTrue(c.moveToFirst());assertTrue(c.getLong(0)>0);assertEquals(0,c.getInt(1));saved.set("saved");
         }});assertEquals("saved",saved.get());
+        android.graphics.Bitmap screen=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getUiAutomation().takeScreenshot();
+        java.io.File file=new java.io.File(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null),"android-smoke.png");
+        try(java.io.FileOutputStream out=new java.io.FileOutputStream(file)){screen.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out);}
         js("document.getElementById('disconnect').click();true");
     }
     @Test public void unpaidCloudRequestDoesNotUpload()throws Exception{

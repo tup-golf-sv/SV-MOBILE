@@ -108,3 +108,33 @@ def test_rtdn_out_of_order_rechecks_google(ctx,monkeypatch):
     assert c.post('/v1/play/rtdn',json=envelope,headers={'Authorization':'Bearer good'}).status_code==200
     assert c.post('/v1/play/rtdn',json=envelope,headers={'Authorization':'Bearer good'}).status_code==200
     assert c.get('/v1/videos').status_code==403
+
+def test_acknowledgement_is_server_side_and_retryable(ctx,monkeypatch):
+    c,state=ctx;state['payload']['acknowledgementState']='ACKNOWLEDGEMENT_STATE_PENDING'
+    calls=[]
+    class Reply:
+        def raise_for_status(self):pass
+    class Session:
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def post(self,url,**kwargs):calls.append(url);return Reply()
+    monkeypatch.setattr(m,'google_session',Session)
+    assert c.post('/v1/purchases/verify',json={'purchaseToken':TOKEN}).json()['pro']
+    assert len(calls)==1 and calls[0].endswith(':acknowledge')
+
+def test_deleted_purchase_denies_access(ctx):
+    c,state=ctx;c.post('/v1/purchases/verify',json={'purchaseToken':TOKEN})
+    state['payload']=None
+    assert c.get('/v1/videos').status_code==403
+
+def test_token_replay_from_other_firebase_account(ctx):
+    c,_=ctx;c.post('/v1/purchases/verify',json={'purchaseToken':TOKEN})
+    m.app.dependency_overrides[m.user]=lambda:'other'
+    assert c.post('/v1/purchases/verify',json={'purchaseToken':TOKEN}).status_code==403
+
+def test_renewal_keeps_order_history(ctx):
+    c,state=ctx;c.post('/v1/purchases/verify',json={'purchaseToken':TOKEN})
+    state['payload']['lineItems'][0]['latestSuccessfulOrderId']='GPA.123..1'
+    c.get('/v1/entitlement')
+    with m.db() as d:
+        assert d.execute('SELECT COUNT(*) FROM orders').fetchone()[0]==2

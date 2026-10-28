@@ -50,7 +50,7 @@ final class ProBilling implements PurchasesUpdatedListener {
         new AlertDialog.Builder(app).setTitle(signup?"회원가입":"로그인").setView(form).setNegativeButton("취소",null).setPositiveButton("확인",(d,n)->{
             String address=email.getText().toString().trim(),secret=password.getText().toString();
             io.execute(()->{try{
-                if(secret.length()<8)throw new IOException("비밀번호는 8자 이상이어야 합니다.");
+                if(signup && secret.length()<8)throw new IOException("비밀번호는 8자 이상이어야 합니다.");
                 JSONObject body=new JSONObject().put("email",address).put("password",secret).put("returnSecureToken",true);
                 JSONObject result=json("https://identitytoolkit.googleapis.com/v1/accounts:"+(signup?"signUp":"signInWithPassword")+"?key="+BuildConfig.FIREBASE_API_KEY,"POST",body.toString(),null);
                 idToken=result.getString("idToken");uid=result.getString("localId");

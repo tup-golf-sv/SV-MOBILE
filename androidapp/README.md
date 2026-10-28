@@ -10,7 +10,7 @@ claim about a previously agreed commercial plan or price.
 
 ## Build
 
-Java 17, Android SDK 35, Gradle 8.10.2:
+Java 17, Android SDK 36, Gradle 8.11.1:
 
     gradle -p androidapp assembleDebug bundleRelease assembleDebugAndroidTest lintDebug
     gradle -p androidapp connectedDebugAndroidTest
