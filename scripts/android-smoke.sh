@@ -6,12 +6,14 @@ adb logcat -c
 adb logcat > android-evidence/logcat.txt 2>&1 &
 sv_logcat_pid=$!
 collect_evidence() {
-  adb shell dumpsys package kr.co.tupgolf.svmobile > android-evidence/installed-package.txt
-  adb shell dumpsys meminfo kr.co.tupgolf.svmobile > android-evidence/memory.txt
-  adb shell content query --uri content://media/external/video/media > android-evidence/media-store.txt
-  adb shell wm size > android-evidence/display.txt
-  adb pull /sdcard/Android/data/kr.co.tupgolf.svmobile/files/android-smoke.png android-evidence/android-smoke.png
-  adb exec-out screencap -p > android-evidence/final-screen.png
+  free -m > android-evidence/host-memory.txt
+  ps -eo pid,rss,comm --sort=-rss | head -15 > android-evidence/host-processes.txt
+  timeout 15 adb shell dumpsys package kr.co.tupgolf.svmobile > android-evidence/installed-package.txt
+  timeout 15 adb shell dumpsys meminfo kr.co.tupgolf.svmobile > android-evidence/memory.txt
+  timeout 15 adb shell content query --uri content://media/external/video/media > android-evidence/media-store.txt
+  timeout 15 adb shell wm size > android-evidence/display.txt
+  timeout 15 adb pull /sdcard/Android/data/kr.co.tupgolf.svmobile/files/android-smoke.png android-evidence/android-smoke.png
+  timeout 15 adb exec-out screencap -p > android-evidence/final-screen.png
   kill "$sv_logcat_pid" 2>/dev/null || true
 }
 trap collect_evidence EXIT
