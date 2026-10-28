@@ -693,13 +693,52 @@ const SWING_CAPTURE_MS=3200;
  }
 
 
-function tone(freq=880,d=.14){
+// Stronger READY cue on phones only. TV/desktop retain the original tone.
+function svIsReadyAudioPhone(){
+  const ua=navigator.userAgent||'';
+  if(/SmartTV|SMART-TV|HbbTV|Tizen|Web0S|WebOS|Android TV|GoogleTV|AFT\w*|BRAVIA|Innos/i.test(ua))return false;
+  return /iPhone|iPod/i.test(ua)||(/Android/i.test(ua)&&/Mobile/i.test(ua));
+}
+let svReadyAudioContext=null;
+function svUnlockReadyAudio(){
+  if(!svIsReadyAudioPhone())return null;
   try{
-    const a=new(window.AudioContext||window.webkitAudioContext)();
-    const o=a.createOscillator(),g=a.createGain();
-    o.connect(g);g.connect(a.destination);o.frequency.value=freq;g.gain.value=.13;
-    o.start();o.stop(a.currentTime+d);
-  }catch(e){}
+    const AudioCtor=window.AudioContext||window.webkitAudioContext;
+    if(!AudioCtor)return null;
+    if(!svReadyAudioContext||svReadyAudioContext.state==='closed')svReadyAudioContext=new AudioCtor();
+    if(svReadyAudioContext.state==='suspended')svReadyAudioContext.resume().catch(()=>{});
+    return svReadyAudioContext;
+  }catch(e){return null;}
+}
+document.addEventListener('pointerdown',svUnlockReadyAudio,{capture:true,passive:true});
+document.addEventListener('keydown',svUnlockReadyAudio,{capture:true});
+function tone(freq=880,d=.14){
+  if(!svIsReadyAudioPhone()){
+    try{
+      const a=new(window.AudioContext||window.webkitAudioContext)();
+      const o=a.createOscillator(),g=a.createGain();
+      o.connect(g);g.connect(a.destination);o.frequency.value=freq;g.gain.value=.13;
+      o.start();o.stop(a.currentTime+d);
+    }catch(e){}
+    return;
+  }
+  const a=svUnlockReadyAudio();if(!a)return;
+  const play=()=>{
+    if(a.state!=='running')return;
+    try{
+      const o=a.createOscillator(),g=a.createGain(),t=a.currentTime;
+      const duration=Math.max(d,.24);
+      o.type='sine';o.frequency.value=1400;
+      g.gain.setValueAtTime(0,t);
+      g.gain.linearRampToValueAtTime(.45,t+.008);
+      g.gain.setValueAtTime(.45,t+duration-.025);
+      g.gain.linearRampToValueAtTime(0,t+duration);
+      o.connect(g);g.connect(a.destination);
+      o.onended=()=>{o.disconnect();g.disconnect();};
+      o.start(t);o.stop(t+duration);
+    }catch(e){}
+  };
+  if(a.state==='running')play();else a.resume().then(play).catch(()=>{});
 }
 
 function dist(a,b){
