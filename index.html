@@ -2582,7 +2582,7 @@ $('disconnect').onclick=()=>{
  if(!stage||!panel||document.getElementById('svDrawOverlay'))return;
  const overlay=document.createElement('canvas');overlay.id='svDrawOverlay';stage.appendChild(overlay);
  const bar=document.createElement('div');bar.id='svDrawBar';
- bar.innerHTML='<button type="button" data-mode="free">자유선</button><button type="button" data-mode="line">직선</button><button type="button" data-mode="circle">원</button><button type="button" data-mode="angle">각도 3점</button><button type="button" data-mode="move">선택·이동</button><button type="button" data-mode="off" class="active">그리기 OFF</button><input type="color" id="svDrawColor" value="#f5d86a" aria-label="선 색상"><button type="button" id="svDrawUndo">되돌리기</button><button type="button" id="svDrawClear">전체 삭제</button><span id="svDrawInfo">영상을 정지한 뒤 직선·원·각도를 선택하세요.</span>';
+ bar.innerHTML='<button type="button" data-mode="free">자유선</button><button type="button" data-mode="line">직선</button><button type="button" data-mode="arrow">화살표</button><button type="button" data-mode="circle">원</button><button type="button" data-mode="angle">각도 3점</button><button type="button" data-mode="move">선택·이동</button><button type="button" data-mode="off" class="active">그리기 OFF</button><input type="color" id="svDrawColor" value="#f5d86a" aria-label="선 색상"><button type="button" id="svDrawUndo">되돌리기</button><button type="button" id="svDrawClear">전체 삭제</button><span id="svDrawInfo">영상을 정지한 뒤 직선·화살표·원·각도를 선택하세요.</span>';
  document.body.appendChild(bar); // toolbar must remain visible when replay panel is hidden in LIVE mode
  const info=document.getElementById('svDrawInfo'),ctx=overlay.getContext('2d');
  let mode='off',shapes=[],anglePoints=[],dragStart=null,dragEnd=null,ink='#f5d86a';
@@ -2596,11 +2596,19 @@ $('disconnect').onclick=()=>{
   const xy=p=>({x:p.x*w,y:p.y*h});
   function draw(shape){
    ctx.strokeStyle=shape.color;ctx.fillStyle=shape.color;
-   if(shape.type==='free'){const pts=shape.points.map(xy);if(!pts.length)return;ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.stroke();}else if(shape.type==='line'||shape.type==='circle'){
+   if(shape.type==='free'){const pts=shape.points.map(xy);if(!pts.length)return;ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.stroke();}else if(shape.type==='line'||shape.type==='arrow'||shape.type==='circle'){
     const a=xy(shape.a),b=xy(shape.b);ctx.beginPath();
-    if(shape.type==='line'){ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y)}
+    if(shape.type==='line'||shape.type==='arrow'){ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y)}
     else ctx.arc(a.x,a.y,Math.hypot(b.x-a.x,b.y-a.y),0,Math.PI*2);
     ctx.stroke();
+    if(shape.type==='arrow'){
+     const angle=Math.atan2(b.y-a.y,b.x-a.x),length=Math.hypot(b.x-a.x,b.y-a.y);
+     const head=Math.min(18,length*.35),spread=Math.PI/7;
+     ctx.beginPath();ctx.moveTo(b.x,b.y);
+     ctx.lineTo(b.x-head*Math.cos(angle-spread),b.y-head*Math.sin(angle-spread));
+     ctx.lineTo(b.x-head*Math.cos(angle+spread),b.y-head*Math.sin(angle+spread));
+     ctx.closePath();ctx.fill();
+    }
    } else if(shape.type==='angle'){
     const [a,b,c]=shape.points.map(xy);
     ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.lineTo(c.x,c.y);ctx.stroke();
@@ -2640,7 +2648,7 @@ $('disconnect').onclick=()=>{
    if(sh.type!=='free')for(let j=0;j<v.length;j++)if(Math.hypot(px.x-v[j].x,px.y-v[j].y)<=limit)return {i,handle:j};
    let d=Infinity;
    if(sh.type==='free'){for(let j=1;j<v.length;j++)d=Math.min(d,pointLineDistance(px,v[j-1],v[j]));}
-   else if(sh.type==='line')d=pointLineDistance(px,v[0],v[1]);
+   else if(sh.type==='line'||sh.type==='arrow')d=pointLineDistance(px,v[0],v[1]);
    else if(sh.type==='circle')d=Math.abs(Math.hypot(px.x-v[0].x,px.y-v[0].y)-Math.hypot(v[1].x-v[0].x,v[1].y-v[0].y));
    else d=Math.min(pointLineDistance(px,v[0],v[1]),pointLineDistance(px,v[1],v[2]));
    if(d<=limit)return {i,handle:-1};
