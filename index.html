@@ -857,9 +857,9 @@ function addressSimilarity(lm){
     ['손-골반',handFromHips<=1.55,handFromHips,'≤1.55'],
     ['다리 길이',hipToKnee>=0.13 && kneeToAnkle>=0.13,Math.min(hipToKnee,kneeToAnkle),'≥0.13']
   ];
-  // 기존 V11.1 계열처럼 7개 중 5개 이상이면 어드레스 후보.
+  // 복구본의 7개 조건과 허용 범위는 유지하고, 7개 모두 충족해야 어드레스 후보.
   // 단, 명확한 짝다리로 판단되면 ADDRESS로 인정하지 않는다.
-  return {ok:(score>=5 && !obviousOneLeg),score,obviousOneLeg,checks};
+  return {ok:(score>=7 && !obviousOneLeg),score,obviousOneLeg,checks};
 }
 
 
