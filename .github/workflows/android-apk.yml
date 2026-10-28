@@ -1,0 +1,110 @@
+name: Android APK build
+on:
+  push:
+    branches: [android-release-build]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Generate isolated Android wrapper
+        run: |
+          mkdir -p androidapp/app/src/main/java/kr/co/tupgolf/svmobile
+          cat > androidapp/settings.gradle <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+          rootProject.name = 'SVMobile'
+          include ':app'
+          EOF
+          echo "plugins { id 'com.android.application' version '8.7.3' apply false }" > androidapp/build.gradle
+          cat > androidapp/app/build.gradle <<'EOF'
+          plugins { id 'com.android.application' }
+          android {
+            namespace 'kr.co.tupgolf.svmobile'
+            compileSdk 35
+            defaultConfig { applicationId 'kr.co.tupgolf.svmobile'; minSdk 26; targetSdk 35; versionCode 1; versionName '0.1.0' }
+          }
+          EOF
+          cat > androidapp/app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <uses-permission android:name="android.permission.INTERNET"/>
+            <uses-permission android:name="android.permission.CAMERA"/>
+            <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+            <uses-feature android:name="android.hardware.camera" android:required="false"/>
+            <application android:label="T.UP SV MOBILE" android:usesCleartextTraffic="false" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+              <activity android:name=".MainActivity" android:exported="true">
+                <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+              </activity>
+            </application>
+          </manifest>
+          EOF
+          cat > androidapp/app/src/main/java/kr/co/tupgolf/svmobile/MainActivity.java <<'EOF'
+          package kr.co.tupgolf.svmobile;
+          import android.Manifest;
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.webkit.*;
+          import android.content.Intent;
+          import android.net.Uri;
+          import android.content.pm.PackageManager;
+          import android.os.Build;
+          public class MainActivity extends Activity {
+            private WebView web;
+            private ValueCallback<Uri[]> chooser;
+            private static final int PICK=20, PERM=21;
+            @Override public void onCreate(Bundle b) {
+              super.onCreate(b);
+              web=new WebView(this);
+              setContentView(web);
+              WebSettings s=web.getSettings();
+              s.setJavaScriptEnabled(true);
+              s.setDomStorageEnabled(true);
+              s.setMediaPlaybackRequiresUserGesture(false);
+              web.setWebViewClient(new WebViewClient());
+              web.setWebChromeClient(new WebChromeClient() {
+                @Override public void onPermissionRequest(PermissionRequest request) {
+                  runOnUiThread(()->{
+                    if (Build.VERSION.SDK_INT>=23 && (checkSelfPermission(Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED || checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)) {
+                      request.deny(); requestPermissions(new String[]{Manifest.permission.CAMERA,Manifest.permission.RECORD_AUDIO},PERM);
+                    } else {
+                      java.util.ArrayList<String> allowed=new java.util.ArrayList<>();
+                      for(String r:request.getResources()) if(r.equals(PermissionRequest.RESOURCE_VIDEO_CAPTURE)||r.equals(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) allowed.add(r);
+                      if(allowed.isEmpty()) request.deny(); else request.grant(allowed.toArray(new String[0]));
+                    }
+                  });
+                }
+                @Override public boolean onShowFileChooser(WebView view,ValueCallback<Uri[]> callback,FileChooserParams params) {
+                  if(chooser!=null) chooser.onReceiveValue(null);
+                  chooser=callback;
+                  try { startActivityForResult(params.createIntent(),PICK); return true; }
+                  catch(Exception ex) { chooser=null; callback.onReceiveValue(null); return false; }
+                }
+              });
+              if(Build.VERSION.SDK_INT>=23) requestPermissions(new String[]{Manifest.permission.CAMERA,Manifest.permission.RECORD_AUDIO},PERM);
+              web.loadUrl("https://tup-golf-sv.github.io/SV-MOBILE/");
+            }
+            @Override protected void onActivityResult(int req,int result,Intent data) {
+              super.onActivityResult(req,result,data);
+              if(req==PICK && chooser!=null) { chooser.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result,data)); chooser=null; }
+            }
+            @Override public void onBackPressed() { if(web.canGoBack()) web.goBack(); else super.onBackPressed(); }
+          }
+          EOF
+      - name: Compile debug APK
+        working-directory: androidapp
+        run: gradle --no-daemon assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sv-mobile-debug-apk
+          path: androidapp/app/build/outputs/apk/debug/*.apk
