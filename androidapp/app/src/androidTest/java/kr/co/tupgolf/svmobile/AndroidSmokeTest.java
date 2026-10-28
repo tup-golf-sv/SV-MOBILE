@@ -16,6 +16,7 @@ import static org.junit.Assert.*;
 
 /** Emulator smoke tests. These do NOT prove real golfer detection or Play payments. */
 @RunWith(AndroidJUnit4.class)
+@FixMethodOrder(org.junit.runners.MethodSorters.NAME_ASCENDING)
 public class AndroidSmokeTest {
     @Rule public GrantPermissionRule permissions=GrantPermissionRule.grant(Manifest.permission.CAMERA,Manifest.permission.RECORD_AUDIO);
     private ActivityScenario<MainActivity> scenario;
@@ -32,7 +33,7 @@ public class AndroidSmokeTest {
         while(System.currentTimeMillis()<end){result=js(expression);if("true".equals(result))return;Thread.sleep(500);}
         fail("Timed out: "+expression+"; last="+result+"; status="+js("document.getElementById('status')?.textContent"));
     }
-    @Test public void cameraReplayAndMediaStoreRoundTrip()throws Exception{
+    @Test public void cCameraReplayAndMediaStoreRoundTrip()throws Exception{
         until("!!window.__svNativeAdapter && typeof Pose==='function'",60);
         assertEquals("true",js("isSecureContext && !!navigator.mediaDevices.getUserMedia"));
         js("document.getElementById('connect').click();true");
@@ -56,7 +57,17 @@ public class AndroidSmokeTest {
         try(java.io.FileOutputStream out=new java.io.FileOutputStream(file)){screen.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out);}
         js("document.getElementById('disconnect').click();true");
     }
-    @Test public void unpaidCloudRequestDoesNotUpload()throws Exception{
+    @Test public void bCanvasRecordingReplayAndNativeSave()throws Exception{
+        until("!!window.__svNativeAdapter",60);
+        js("window.__saveError='';(async()=>{try{const c=document.createElement('canvas');c.width=320;c.height=240;const x=c.getContext('2d'),s=c.captureStream(10),r=new MediaRecorder(s,{mimeType:'video/webm'}),parts=[];let frame=0;const tick=setInterval(()=>{x.fillStyle=frame++%2?'#176647':'#9dcc53';x.fillRect(0,0,320,240);x.fillStyle='white';x.font='24px sans-serif';x.fillText('SV storage test '+frame,20,120);},100);r.ondataavailable=e=>{if(e.data.size)parts.push(e.data)};r.onstop=()=>{clearInterval(tick);s.getTracks().forEach(t=>t.stop());svLoadCapturedFront(new Blob(parts,{type:'video/webm'}));};r.start(100);setTimeout(()=>r.stop(),1500);}catch(e){window.__saveError=e.message;}})();true");
+        until("!!latestReplayBlob && latestReplayBlob.size>0 && replay.videoWidth>0",30);
+        until("!document.getElementById('svMobileSaveBtn').disabled",10);
+        js("document.getElementById('svMobileSaveBtn').click();true");
+        until("document.getElementById('svMobileSaveStatus').textContent.includes('Movies/SV MOBILE')",60);
+        scenario.onActivity(a->{try(Cursor c=a.getContentResolver().query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,new String[]{MediaStore.Video.Media.SIZE,MediaStore.Video.Media.IS_PENDING},MediaStore.Video.Media.RELATIVE_PATH+"=?",new String[]{"Movies/SV MOBILE/"},MediaStore.Video.Media.DATE_ADDED+" DESC")){assertNotNull(c);assertTrue(c.moveToFirst());assertTrue(c.getLong(0)>0);assertEquals(0,c.getInt(1));}});
+        System.out.println("SV_SMOKE_STAGE=canvas-record-replay-and-mediastore-verified");
+    }
+    @Test public void aUnpaidCloudRequestDoesNotUpload()throws Exception{
         until("!!window.__svNativeAdapter",60);
         js("window.__denial='';SVNative.onmessage=e=>window.__denial=JSON.parse(e.data);SVNative.postMessage(JSON.stringify({id:'denied',action:'begin',session:'test',mode:'cloud',mime:'video/webm',size:8}));true");
         until("!!window.__denial && window.__denial.ok===false",15);

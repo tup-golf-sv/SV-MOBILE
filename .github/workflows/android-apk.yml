@@ -72,15 +72,24 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      - name: Start virtual display for Mesa
+        run: |
+          if ! command -v Xvfb >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y xvfb libgl1-mesa-dri
+          fi
+          Xvfb :99 -screen 0 1024x768x24 > /tmp/sv-xvfb.log 2>&1 &
+          echo 'DISPLAY=:99' >> "$GITHUB_ENV"
       - uses: reactivecircus/android-emulator-runner@v2
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
         with:
           api-level: 36
           arch: x86_64
-          target: google_apis
+          target: default
           profile: pixel_2
-          emulator-options: -no-window -gpu host -feature -Vulkan -no-snapshot -memory 4096 -cores 4 -skin 480x800 -noaudio -no-boot-anim -camera-back emulated -camera-front emulated
+          emulator-options: -no-window -gpu host -feature -Vulkan -no-snapshot -memory 3072 -cores 4 -skin 480x800 -noaudio -no-boot-anim -camera-back emulated -camera-front emulated
+          emulator-boot-timeout: 180
           disable-animations: true
           working-directory: androidapp
           script: bash ../scripts/android-smoke.sh
