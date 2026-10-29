@@ -50,6 +50,10 @@ def db():
     CREATE TABLE IF NOT EXISTS account_deletion_requests (
         request_id TEXT PRIMARY KEY, uid TEXT NOT NULL UNIQUE,
         requested_at TEXT NOT NULL, status TEXT NOT NULL CHECK(status='RECEIVED'));
+    CREATE TABLE IF NOT EXISTS account_deletion_jobs (
+        request_id TEXT PRIMARY KEY, state TEXT NOT NULL
+        CHECK(state IN ('PROCESSING','FAILED','COMPLETED')),
+        owner TEXT NOT NULL, updated REAL NOT NULL, error_code TEXT NOT NULL DEFAULT '');
     """)
     return c
 
@@ -67,11 +71,23 @@ def user(authorization: str | None = Header(default=None)):
         claims = id_token.verify_firebase_token(bearer(authorization), GoogleRequest(), audience=PROJECT)
         if claims.get("iss") != f"https://securetoken.google.com/{PROJECT}" or not claims.get("sub"):
             raise ValueError("invalid identity")
+        ensure_account_open(claims["sub"])
         return claims["sub"]
     except HTTPException:
         raise
     except Exception:
         raise HTTPException(401, "로그인이 만료되었습니다.") from None
+
+
+def ensure_account_open(uid):
+    # Already-issued Firebase ID tokens can outlive a deleted Firebase user.
+    c = db()
+    try:
+        row = c.execute("SELECT 1 FROM account_deletion_requests r JOIN account_deletion_jobs j ON j.request_id=r.request_id WHERE r.uid=?", (uid,)).fetchone()
+    finally:
+        c.close()
+    if row:
+        raise HTTPException(403, "계정 삭제 처리 중이거나 삭제된 계정입니다.")
 
 
 def google_session():
@@ -130,6 +146,9 @@ def refresh(token, uid, acknowledge=False):
     c = db()
     try:
         with c:
+            c.execute("BEGIN IMMEDIATE")
+            if c.execute("SELECT 1 FROM account_deletion_requests r JOIN account_deletion_jobs j ON j.request_id=r.request_id WHERE r.uid=?", (uid,)).fetchone():
+                raise HTTPException(403, "계정 삭제 처리 중이거나 삭제된 계정입니다.")
             row = c.execute("SELECT uid FROM purchases WHERE token=?", (token,)).fetchone()
             if row and row["uid"] != uid:
                 raise HTTPException(403, "구매 계정이 일치하지 않습니다.")
@@ -198,12 +217,12 @@ def request_account_deletion(request: AccountDeletionRequest, uid=Depends(user))
         with c:
             c.execute("INSERT OR IGNORE INTO account_deletion_requests VALUES (?,?,?,?)",
                       (uuid.uuid4().hex, uid, datetime.now(timezone.utc).isoformat(), "RECEIVED"))
-            row = c.execute("SELECT request_id,requested_at,status FROM account_deletion_requests WHERE uid=?", (uid,)).fetchone()
+            row = c.execute("SELECT r.request_id,r.requested_at,COALESCE(j.state,r.status) AS status FROM account_deletion_requests r LEFT JOIN account_deletion_jobs j ON j.request_id=r.request_id WHERE r.uid=?", (uid,)).fetchone()
     finally:
         c.close()
     return JSONResponse({"requestId": row["request_id"], "requestedAt": row["requested_at"],
-                         "status": row["status"], "deletionCompleted": False,
-                         "message": "삭제 요청을 접수했습니다. 계정과 데이터 삭제는 아직 완료되지 않았습니다. Google Play 구독은 별도로 관리하세요."},
+                         "status": row["status"], "deletionCompleted": row["status"] == "COMPLETED",
+                         "message": ("Firebase 계정, 보관 영상, 구매·주문 DB 삭제 처리가 완료되었습니다. 삭제 요청·처리 감사기록은 보존됩니다. Google Play 구독은 별도로 관리하세요." if row["status"] == "COMPLETED" else "삭제 요청을 접수했습니다. 계정과 데이터 삭제는 아직 완료되지 않았습니다. Google Play 구독은 별도로 관리하세요.")},
                         headers={"Cache-Control": "no-store"})
 
 
@@ -213,7 +232,7 @@ def account_deletion_requests(uid=Depends(user)):
         raise HTTPException(403, "운영자 권한이 필요합니다.")
     c = db()
     try:
-        rows = c.execute("SELECT request_id AS requestId,uid,requested_at AS requestedAt,status FROM account_deletion_requests ORDER BY requested_at DESC LIMIT 500").fetchall()
+        rows = c.execute("SELECT r.request_id AS requestId,r.uid,r.requested_at AS requestedAt,COALESCE(j.state,r.status) AS status FROM account_deletion_requests r LEFT JOIN account_deletion_jobs j ON j.request_id=r.request_id ORDER BY r.requested_at DESC LIMIT 500").fetchall()
     finally:
         c.close()
     return JSONResponse({"requests": [dict(r) for r in rows],
@@ -279,6 +298,9 @@ async def upload(request: Request, uid=Depends(pro_user)):
         c = db()
         try:
             c.execute("BEGIN IMMEDIATE")
+            blocked = c.execute("SELECT 1 FROM account_deletion_requests r JOIN account_deletion_jobs j ON j.request_id=r.request_id WHERE r.uid=?", (uid,)).fetchone()
+            if blocked:
+                raise HTTPException(403, "계정 삭제 처리 중이거나 삭제된 계정입니다.")
             used = c.execute("SELECT COALESCE(SUM(size),0) FROM videos WHERE uid=?", (uid,)).fetchone()[0]
             if used + total > QUOTA:
                 raise HTTPException(413, "클라우드 보관 용량을 초과했습니다.")
@@ -359,9 +381,15 @@ async def rtdn(request: Request, authorization: str | None = Header(default=None
             return {"ok": True}
         token = payload.get("subscriptionNotification", {}).get("purchaseToken") or payload.get("voidedPurchaseNotification", {}).get("purchaseToken")
         row = c.execute("SELECT uid FROM purchases WHERE token=?", (token,)).fetchone() if token else None
-        if row:
+        deletion_job = c.execute("SELECT 1 FROM account_deletion_requests r JOIN account_deletion_jobs j ON j.request_id=r.request_id WHERE r.uid=?", (row["uid"],)).fetchone() if row else None
+        if row and not deletion_job:
             # Refund, revoke, renew, hold, cancel all re-read Play; no out-of-order grants.
-            refresh(token, row["uid"], acknowledge=True)
+            try:
+                refresh(token, row["uid"], acknowledge=True)
+            except HTTPException as error:
+                # A worker can claim this UID between the preceding check and refresh.
+                if error.status_code != 403 or not c.execute("SELECT 1 FROM account_deletion_requests r JOIN account_deletion_jobs j ON j.request_id=r.request_id WHERE r.uid=?", (row["uid"],)).fetchone():
+                    raise
         with c:
             c.execute("INSERT OR IGNORE INTO notifications VALUES (?,?)", (message_id, time.time()))
     finally:

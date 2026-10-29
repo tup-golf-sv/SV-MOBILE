@@ -85,3 +85,27 @@ failed its camera/golfer workflow.
   1m03s (115 tasks). APK signature verified, web source remains byte-identical.
 - Physical camera, real Firebase connection, actual Play payment and actual
   deletion processing remain UNKNOWN / unfinished as listed in blocked-work.md.
+
+## Approved remote CI17
+
+The owner explicitly authorized development-branch upload and CI. Shell push had
+no credentials, so connected GitHub APIs uploaded the same 25 files. Remote tree
+0682b027bc061e6853dbc88efa90a6cb9f7f05f7 equals the local verified tree exactly.
+Commit 9af2fde6e753ac784da5a73151f90001fcd5fd8b, run 40817518315.
+
+Remote build passed: backend 41, simulated UI 7, product guard and plan/lifecycle
+regressions; APK/AAB/test APK/lint and signature/original-source checks passed.
+Emulator unpaid-cloud denial and canvas record/replay/MediaStore save passed.
+Camera test failed after roughly 12 seconds during model wait: 10-second
+JavaScript callback timeout. Earlier evidence showed model callback approximately
+21 seconds after camera connection. Renderer crash logged after teardown is not
+evidence of the initiating cause. No ANR or memory exhaustion was established.
+
+Next test-only correction: model startup uses a 60-second callback budget within
+the unchanged 120-second total deadline. Other stages retain 10 seconds; timeout
+logs UI queue entry, evaluation return and main-thread stack. Added forced-trigger
+production pre-roll encoding test. This does not validate real golfer detection.
+
+The disabled deletion worker now has local simulated-Google state-transition,
+retry/isolation and RTDN-race tests: total backend suite 56 passed. Real Google
+deletion and operational retention/backup/notification policy remain unverified.

@@ -24,7 +24,7 @@ adb install -r -g ci-artifacts/outputs/apk/androidTest/debug/app-debug-androidTe
 # Isolate each method in a fresh instrumented process. A blocked UI thread must
 # not prevent the remaining tests or hide which phase failed.
 sv_test_result=0
-for sv_method in aUnpaidCloudRequestDoesNotUpload bCanvasRecordingReplayAndNativeSave cCameraReplayAndMediaStoreRoundTrip; do
+for sv_method in aUnpaidCloudRequestDoesNotUpload bCanvasRecordingReplayAndNativeSave cCameraReplayAndMediaStoreRoundTrip dActualPreRollCapture; do
   adb shell am force-stop kr.co.tupgolf.svmobile
   # Budgets include all sequential stage maxima, startup and teardown.
   # Camera: 60+60+120+30+60 seconds, plus direct callbacks and lifecycle.
@@ -32,6 +32,7 @@ for sv_method in aUnpaidCloudRequestDoesNotUpload bCanvasRecordingReplayAndNativ
     a*) sv_method_budget=180 ;;
     b*) sv_method_budget=300 ;;
     c*) sv_method_budget=540 ;;
+    d*) sv_method_budget=600 ;;
   esac
   echo "SV_SMOKE_START_METHOD=$sv_method budget=${sv_method_budget}s"
   timeout "$sv_method_budget" adb shell am instrument -w -e class "kr.co.tupgolf.svmobile.AndroidSmokeTest#$sv_method" kr.co.tupgolf.svmobile.test/androidx.test.runner.AndroidJUnitRunner | tee "android-evidence/$sv_method.txt"
@@ -46,5 +47,5 @@ for sv_method in aUnpaidCloudRequestDoesNotUpload bCanvasRecordingReplayAndNativ
     timeout 15 adb exec-out screencap -p > "android-evidence/$sv_method-screen.png"
   fi
 done
-cat android-evidence/aUnpaidCloudRequestDoesNotUpload.txt android-evidence/bCanvasRecordingReplayAndNativeSave.txt android-evidence/cCameraReplayAndMediaStoreRoundTrip.txt > android-evidence/instrumentation.txt
+cat android-evidence/aUnpaidCloudRequestDoesNotUpload.txt android-evidence/bCanvasRecordingReplayAndNativeSave.txt android-evidence/cCameraReplayAndMediaStoreRoundTrip.txt android-evidence/dActualPreRollCapture.txt > android-evidence/instrumentation.txt
 exit "$sv_test_result"

@@ -2,6 +2,7 @@ package kr.co.tupgolf.svmobile;
 
 import android.Manifest;
 import android.os.SystemClock;
+import android.os.Looper;
 import android.util.Log;
 import android.database.Cursor;
 import android.provider.MediaStore;
@@ -14,6 +15,7 @@ import org.junit.*;
 import org.junit.runner.RunWith;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
 import static org.junit.Assert.*;
 
 /** Emulator smoke tests. These do NOT prove real golfer detection or Play payments. */
@@ -42,18 +44,28 @@ public class AndroidSmokeTest {
         lastExpression=source;
         CountDownLatch latch=new CountDownLatch(1);AtomicReference<String> result=new AtomicReference<>();
         AtomicReference<Throwable> error=new AtomicReference<>();
+        AtomicBoolean uiEntered=new AtomicBoolean(false),evaluateReturned=new AtomicBoolean(false);
         // post returns without waiting for UI idleness, unlike onActivity.
-        boolean queued=web.post(()->{try{web.evaluateJavascript(source,r->{result.set(r);latch.countDown();});}catch(Throwable t){error.set(t);latch.countDown();}});
+        boolean queued=web.post(()->{uiEntered.set(true);try{web.evaluateJavascript(source,r->{result.set(r);latch.countDown();});evaluateReturned.set(true);}catch(Throwable t){error.set(t);latch.countDown();}});
         assertTrue("WebView rejected post; phase="+phase,queued);
-        assertTrue("WebView callback timed out; phase="+phase+"; expression="+source+"; last="+lastJsResult,latch.await(Math.max(1,budgetMs),TimeUnit.MILLISECONDS));
+        boolean completed=latch.await(Math.max(1,budgetMs),TimeUnit.MILLISECONDS);
+        if(!completed){
+            String state="phase="+phase+"; uiEntered="+uiEntered.get()+"; evaluateReturned="+evaluateReturned.get();
+            Log.e("SVSmoke","SV_JS_TIMEOUT "+state);
+            for(StackTraceElement frame:Looper.getMainLooper().getThread().getStackTrace())Log.e("SVSmoke","SV_UI_STACK "+frame);
+            fail("WebView callback timed out; "+state+"; expression="+source+"; last="+lastJsResult);
+        }
         if(error.get()!=null)throw new AssertionError("WebView evaluation failed; phase="+phase,error.get());
         lastJsResult=result.get();return lastJsResult;
     }
     private void until(String expression,int seconds)throws Exception{
+        until(expression,seconds,10000);
+    }
+    private void until(String expression,int seconds,long callbackBudgetMs)throws Exception{
         long end=SystemClock.elapsedRealtime()+seconds*1000L;String result="";
         while(SystemClock.elapsedRealtime()<end){
             long remaining=end-SystemClock.elapsedRealtime();
-            result=js(expression,Math.min(10000,remaining));if("true".equals(result))return;
+            result=js(expression,Math.min(callbackBudgetMs,remaining));if("true".equals(result))return;
             remaining=end-SystemClock.elapsedRealtime();if(remaining>0)Thread.sleep(Math.min(500,remaining));
         }
         // Do not submit more JS to diagnose a renderer that may already be stuck.
@@ -68,7 +80,7 @@ public class AndroidSmokeTest {
         until("typeof stream!=='undefined' && !!stream && raw.videoWidth>0",60);
         stage("camera-connected-wait-model");
         // Model callback proves the unchanged model runs, not that a golfer was detected.
-        until("typeof lastPoseRenderAt!=='undefined' && lastPoseRenderAt>0",120);
+        until("typeof lastPoseRenderAt!=='undefined' && lastPoseRenderAt>0",120,60000);
         stage("model-callback-start-camera-recorder");
         js("window.__smokeError='';(async()=>{try{const r=new MediaRecorder(stream,{mimeType:'video/webm'}),parts=[];r.ondataavailable=e=>{if(e.data.size)parts.push(e.data)};r.onstop=()=>svLoadCapturedFront(new Blob(parts,{type:'video/webm'}));r.start(100);setTimeout(()=>r.stop(),2000);}catch(e){window.__smokeError=e.message;}})();true");
         stage("wait-replay-ready");
@@ -85,6 +97,44 @@ public class AndroidSmokeTest {
         java.io.File file=new java.io.File(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null),"android-smoke.png");
         try(java.io.FileOutputStream out=new java.io.FileOutputStream(file)){screen.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out);}
         js("document.getElementById('disconnect').click();true");
+    }
+    /** Exercises production frame buffering/encoding with a forced trigger.
+     * Does NOT prove golfer recognition, ADDRESS lock, or automatic detection. */
+    @Test public void dActualPreRollCapture()throws Exception{
+        stage("preroll-native-ready-forced-trigger-not-golfer-detection");
+        until("!!window.__svNativeAdapter && typeof Pose==='function'",60);
+        stage("preroll-connect-camera");
+        js("document.getElementById('connect').click();true");
+        until("typeof stream!=='undefined' && !!stream && raw.videoWidth>0",60);
+        long previousId=latestSavedMediaId();
+        stage("preroll-arm-and-fill-buffer");
+        until("typeof lastPoseRenderAt!=='undefined' && lastPoseRenderAt>0",120,60000);
+        js("document.getElementById('arm').click();true");
+        until("armed && svRolling.front.length>=20 && svRolling.front[svRolling.front.length-1].t-svRolling.front[0].t>=1200",60);
+        String buffer=js("JSON.stringify({frames:svRolling.front.length,spanMs:svRolling.front[svRolling.front.length-1].t-svRolling.front[0].t,width:svRolling.front[0].frame.width,height:svRolling.front[0].frame.height})");
+        Log.i("SVSmoke","SV_PREROLL_BUFFER="+buffer);System.out.println("SV_PREROLL_BUFFER="+buffer);
+        stage("preroll-force-production-trigger");
+        assertEquals("true",js("!svCaptureActive && (latestReplayBlob=null,svStartPreRollCapture(),svCaptureActive)"));
+        stage("preroll-wait-production-encode-and-replay");
+        until("!!latestReplayBlob && latestReplayBlob.size>0 && replay.videoWidth>0",120);
+        Log.i("SVSmoke","SV_PREROLL_REPLAY="+js("JSON.stringify({bytes:latestReplayBlob.size,width:replay.videoWidth,height:replay.videoHeight,duration:replay.duration,result:document.getElementById('result').textContent})"));
+        until("!document.getElementById('svMobileSaveBtn').disabled",10);
+        stage("preroll-save-production-replay");
+        js("document.getElementById('svMobileSaveBtn').click();true");
+        until("document.getElementById('svMobileSaveStatus').textContent.includes('Movies/SV MOBILE')",60);
+        assertTrue("Save must create a new completed nonempty media row",latestSavedMediaId()>previousId);
+        stage("preroll-production-buffer-encode-replay-save-verified-forced-trigger");
+        js("document.getElementById('disconnect').click();true");
+    }
+    private long latestSavedMediaId(){
+        android.content.Context context=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getTargetContext();
+        try(Cursor c=context.getContentResolver().query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.SIZE,MediaStore.Video.Media.IS_PENDING},
+            MediaStore.Video.Media.RELATIVE_PATH+"=?",new String[]{"Movies/SV MOBILE/"},MediaStore.Video.Media._ID+" DESC")){
+            assertNotNull(c);if(!c.moveToFirst())return -1;
+            assertTrue("Saved media must contain bytes",c.getLong(1)>0);assertEquals("Saved media must be finalized",0,c.getInt(2));
+            return c.getLong(0);
+        }
     }
     @Test public void bCanvasRecordingReplayAndNativeSave()throws Exception{
         stage("canvas-native-ready");

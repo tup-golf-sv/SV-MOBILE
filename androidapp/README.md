@@ -40,9 +40,11 @@ delivery have not been verified.
 
 Development 0.2.2 adds an account-deletion request link, authenticated receipt API,
 public request page and admin-only receipt list. A receipt is not actual deletion.
-Actual Firebase/account/video deletion, completion handling and a verified public
-deployment remain release blockers. Do not claim deletion is complete or publish
-the signup-enabled product without resolving and validating the remaining flow.
+An explicit, disabled-by-default deletion worker is prepared and tested with fake
+Firebase deletion. Actual Firebase deletion, retention/backup/notification policy
+and verified public deployment remain release blockers. See
+server/ACCOUNT_DELETION_WORKER.md. Never enable it or claim real deletion based
+on these isolated tests.
 
 Run `python scripts/check-release-config.py` from the repository root with the
 intended deployment/build environment before creating a connected build. It
