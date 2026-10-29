@@ -33,10 +33,15 @@ public class AndroidSmokeTest {
         scenario.onActivity(a->web=find(a.getWindow().getDecorView()));
         assertNotNull("WebView missing",web);stage("activity-ready");
     }
-    @After public void close(){
+    @After public void close()throws Exception{
         // ActivityScenario.close itself may block when the UI thread is hung.
         // The shell watchdog terminates this isolated instrumentation process.
-        stage("activity-close");if(scenario!=null)scenario.close();
+        stage("activity-close");if(scenario!=null){
+            Thread cleanup=new Thread(()->{try{scenario.close();}catch(Throwable t){Log.w("SVSmoke","activity-close-error",t);}},"sv-smoke-cleanup");
+            cleanup.setDaemon(true);cleanup.start();
+            cleanup.join(3000);
+            if(cleanup.isAlive())Log.e("SVSmoke","SV_ACTIVITY_CLOSE_STALLED phase="+phase);
+        }
     }
     private WebView find(View v){if(v instanceof WebView)return (WebView)v;if(v instanceof ViewGroup){ViewGroup g=(ViewGroup)v;for(int i=0;i<g.getChildCount();i++){WebView w=find(g.getChildAt(i));if(w!=null)return w;}}return null;}
     private String js(String source)throws Exception{return js(source,10000);}
