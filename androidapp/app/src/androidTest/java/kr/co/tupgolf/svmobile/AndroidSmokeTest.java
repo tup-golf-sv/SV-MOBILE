@@ -116,7 +116,9 @@ public class AndroidSmokeTest {
         // The rolling sampler starts at camera connection, independently of Pose.
         // Test the production buffer path without waiting for a model callback.
         js("document.getElementById('arm').click();true");
-        until("armed && svRolling.front.length>=20 && svRolling.front[svRolling.front.length-1].t-svRolling.front[0].t>=1200",60);
+        // Exercise the production sampler on every poll; emulator background timers
+        // can be throttled even while the camera stream remains live.
+        until("armed && (svSampleFrame(), svRolling.front.length>=20 && svRolling.front[svRolling.front.length-1].t-svRolling.front[0].t>=1200)",60);
         String buffer=js("JSON.stringify({frames:svRolling.front.length,spanMs:svRolling.front[svRolling.front.length-1].t-svRolling.front[0].t,width:svRolling.front[0].frame.width,height:svRolling.front[0].frame.height})");
         Log.i("SVSmoke","SV_PREROLL_BUFFER="+buffer);System.out.println("SV_PREROLL_BUFFER="+buffer);
         stage("preroll-force-production-trigger");
