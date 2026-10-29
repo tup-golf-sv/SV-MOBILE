@@ -1,0 +1,74 @@
+[
+  {
+    "method": "GET",
+    "path": "/health",
+    "status": 200,
+    "body": {
+      "ok": true
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/v1/config",
+    "status": 503,
+    "body": {
+      "detail": "계정 인증 서버가 설정되지 않았습니다."
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/v1/purchases/verify",
+    "status": 503,
+    "body": {
+      "detail": "계정 인증 서버가 설정되지 않았습니다."
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/v1/entitlement",
+    "status": 503,
+    "body": {
+      "detail": "계정 인증 서버가 설정되지 않았습니다."
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/v1/videos",
+    "status": 503,
+    "body": {
+      "detail": "계정 인증 서버가 설정되지 않았습니다."
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/v1/videos",
+    "status": 503,
+    "body": {
+      "detail": "계정 인증 서버가 설정되지 않았습니다."
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/v1/admin/orders",
+    "status": 503,
+    "body": {
+      "detail": "계정 인증 서버가 설정되지 않았습니다."
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/v1/play/rtdn",
+    "status": 503,
+    "body": {
+      "detail": "알림 인증이 설정되지 않았습니다."
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/v1/auth-config",
+    "status": 200,
+    "body": {
+      "apiKey": ""
+    }
+  }
+]
