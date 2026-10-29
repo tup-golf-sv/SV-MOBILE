@@ -35,8 +35,23 @@ for sv_method in aUnpaidCloudRequestDoesNotUpload bCanvasRecordingReplayAndNativ
     d*) sv_method_budget=600 ;;
   esac
   echo "SV_SMOKE_START_METHOD=$sv_method budget=${sv_method_budget}s"
+  # Capture bounded diagnostic snapshots WHILE instrumentation is running.
+  # The old script only collected evidence after a 600s timeout, losing
+  # the live phase and main-thread state of a stalled pre-roll test.
+  (
+    for sv_tick in 1 2 3 4 5 6 7 8 9 10 11 12; do
+      sleep 30
+      echo "SV_WATCHDOG method=$sv_method elapsed=$((sv_tick * 30))s" >> "android-evidence/$sv_method-watchdog.txt"
+      timeout 8 adb shell dumpsys activity top >> "android-evidence/$sv_method-watchdog.txt" 2>&1 || true
+      timeout 8 adb shell dumpsys meminfo kr.co.tupgolf.svmobile >> "android-evidence/$sv_method-watchdog.txt" 2>&1 || true
+      grep -E 'SV_SMOKE_STAGE|SV_JS_TIMEOUT|SV_UI_STACK|SV_PREROLL' android-evidence/logcat.txt | tail -30 > "android-evidence/$sv_method-phases.txt" || true
+    done
+  ) &
+  sv_watchdog_pid=$!
   timeout "$sv_method_budget" adb shell am instrument -w -e class "kr.co.tupgolf.svmobile.AndroidSmokeTest#$sv_method" kr.co.tupgolf.svmobile.test/androidx.test.runner.AndroidJUnitRunner | tee "android-evidence/$sv_method.txt"
   sv_command_result=${PIPESTATUS[0]}
+  kill "$sv_watchdog_pid" 2>/dev/null || true
+  wait "$sv_watchdog_pid" 2>/dev/null || true
   if [ "$sv_command_result" -ne 0 ] || ! grep -Eq 'OK \([0-9]+ tests?\)' "android-evidence/$sv_method.txt"; then
     sv_test_result=1
     echo "SV_SMOKE_FAILED_METHOD=$sv_method exit=$sv_command_result"
