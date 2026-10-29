@@ -113,7 +113,8 @@ public class AndroidSmokeTest {
         until("typeof stream!=='undefined' && !!stream && raw.videoWidth>0",60);
         long previousId=latestSavedMediaId();
         stage("preroll-arm-and-fill-buffer");
-        until("typeof lastPoseRenderAt!=='undefined' && lastPoseRenderAt>0",120,60000);
+        // The rolling sampler starts at camera connection, independently of Pose.
+        // Test the production buffer path without waiting for a model callback.
         js("document.getElementById('arm').click();true");
         until("armed && svRolling.front.length>=20 && svRolling.front[svRolling.front.length-1].t-svRolling.front[0].t>=1200",60);
         String buffer=js("JSON.stringify({frames:svRolling.front.length,spanMs:svRolling.front[svRolling.front.length-1].t-svRolling.front[0].t,width:svRolling.front[0].frame.width,height:svRolling.front[0].frame.height})");
