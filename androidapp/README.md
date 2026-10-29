@@ -20,6 +20,12 @@ Android 10+; debug signing is development-only. Release AAB is unsigned.
 at build time. Defaults are blank: free features work; purchases and vault fail closed.
 No production credentials, private keys, signing keys or paid accounts are created here.
 
+Development 0.2.1 restricts checkout to single-phase, non-installment auto-renewing
+base plans, guards late Billing callbacks after Activity destruction, and allows
+Billing auto-reconnection APIs to run. Password-reset requests are initiated only
+by the user from the account menu. Actual Play reconnect, checkout and reset-mail
+delivery have not been verified.
+
 ## Owner-controlled integrations
 
 - Play Console app for `kr.co.tupgolf.svmobile`, signing identity and internal testers.
@@ -31,6 +37,18 @@ No production credentials, private keys, signing keys or paid accounts are creat
 - `SV_ADMIN_UIDS` defines operator access; `/operator` displays Google order data.
 - Privacy policy, data deletion, store declarations, identity verification and release signing
   remain release prerequisites. No publicly deployed service or production release is implied.
+
+Development 0.2.2 adds an account-deletion request link, authenticated receipt API,
+public request page and admin-only receipt list. A receipt is not actual deletion.
+Actual Firebase/account/video deletion, completion handling and a verified public
+deployment remain release blockers. Do not claim deletion is complete or publish
+the signup-enabled product without resolving and validating the remaining flow.
+
+Run `python scripts/check-release-config.py` from the repository root with the
+intended deployment/build environment before creating a connected build. It
+reports missing or inconsistent configuration without printing values or making
+network requests. Passing this local check does not validate Firebase, Play API
+permissions, product activation, HTTPS availability, or a real purchase.
 
 ## Test evidence scope
 

@@ -17,14 +17,14 @@ import java.util.function.Consumer;
 
 final class ProBilling implements PurchasesUpdatedListener {
     private final MainActivity app;
-    private final ExecutorService io;
+    private final LifecycleTasks tasks;
     private final Consumer<String> status;
     private final BillingClient billing;
     private final android.content.SharedPreferences prefs;
     private volatile String idToken="", uid="";
     private volatile boolean closed;
     ProBilling(MainActivity app,ExecutorService io,Consumer<String> status){
-        this.app=app;this.io=io;this.status=status;prefs=app.getSharedPreferences("account",0);
+        this.app=app;this.tasks=new LifecycleTasks(io);this.status=status;prefs=app.getSharedPreferences("account",0);
         billing=BillingClient.newBuilder(app).setListener(this).enablePendingPurchases(PendingPurchasesParams.newBuilder().enableOneTimeProducts().build()).enableAutoServiceReconnection().build();
         billing.startConnection(new BillingClientStateListener(){
             public void onBillingSetupFinished(BillingResult result){if(result.getResponseCode()==BillingClient.BillingResponseCode.OK)restore(false);}
@@ -35,12 +35,39 @@ final class ProBilling implements PurchasesUpdatedListener {
         if(!BuildConfig.API_BASE.startsWith("https://")||BuildConfig.FIREBASE_API_KEY.isEmpty())throw new IOException("Pro 서버와 Play 상품 연결 전 개발 빌드입니다. 무료 기능을 사용할 수 있습니다.");
     }
     void show(){
-        String[] options={"로그인", "회원가입", "Pro 구독 구매", "구매 복원", "클라우드 영상 목록", "Google Play 구독 관리", "로그아웃"};
+        if(closed)return;
+        String[] options={"로그인", "회원가입", "Pro 구독 구매", "구매 복원", "클라우드 영상 목록", "Google Play 구독 관리", "로그아웃", "비밀번호 재설정", "계정 삭제 요청"};
         new AlertDialog.Builder(app).setTitle("SV MOBILE Pro · 클라우드 영상 보관").setItems(options,(d,n)->{
             if(n==0||n==1)login(n==1);if(n==2)buy();if(n==3)restore(true);if(n==4)listVideos();
             if(n==5)app.startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse("https://play.google.com/store/account/subscriptions?sku="+BuildConfig.PRO_PRODUCT+"&package="+app.getPackageName())));
+            if(n==7)recoverPassword();
+            if(n==8)openDeletionRequest();
             if(n==6){prefs.edit().clear().apply();idToken="";uid="";status.accept("무료 · 로그아웃");}
         }).show();
+    }
+    private void openDeletionRequest(){
+        try{
+            if(!BuildConfig.API_BASE.startsWith("https://"))throw new IOException("계정 삭제 요청 서버가 아직 연결되지 않았습니다.");
+            String base=BuildConfig.API_BASE.replaceAll("/+$","");
+            app.startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(base+"/account-deletion")));
+        }catch(Exception e){app.toast("계정 삭제 요청 페이지를 열지 못했습니다. 서버 연결과 브라우저를 확인하세요.");}
+    }
+    // Billing callbacks can arrive after Activity.onDestroy shuts down the executor.
+    private void submit(Runnable work){tasks.submit(work);}
+    private void recoverPassword(){
+        try{configured();}catch(Exception e){app.toast(e.getMessage());return;}
+        EditText email=new EditText(app);email.setHint("가입한 이메일");
+        email.setInputType(InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS|InputType.TYPE_CLASS_TEXT);
+        new AlertDialog.Builder(app).setTitle("비밀번호 재설정").setView(email).setNegativeButton("취소",null)
+            .setPositiveButton("재설정 메일 요청",(d,n)->{
+                String address=email.getText().toString().trim();
+                if(!android.util.Patterns.EMAIL_ADDRESS.matcher(address).matches()){app.toast("이메일 주소를 확인하세요.");return;}
+                submit(()->{try{
+                    JSONObject body=new JSONObject().put("requestType","PASSWORD_RESET").put("email",address);
+                    json("https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key="+BuildConfig.FIREBASE_API_KEY,"POST",body.toString(),null);
+                    app.toast("해당 이메일이 등록되어 있다면 재설정 안내를 받을 수 있습니다. 메일함과 스팸함을 확인하세요.");
+                }catch(Exception e){app.toast("재설정 요청을 처리하지 못했습니다. 이메일과 네트워크 연결을 확인하세요.");}});
+            }).show();
     }
     private void login(boolean signup){
         try{configured();}catch(Exception e){app.toast(e.getMessage());return;}
@@ -49,7 +76,7 @@ final class ProBilling implements PurchasesUpdatedListener {
         EditText password=new EditText(app);password.setHint("비밀번호 (8자 이상)");password.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);form.addView(email);form.addView(password);
         new AlertDialog.Builder(app).setTitle(signup?"회원가입":"로그인").setView(form).setNegativeButton("취소",null).setPositiveButton("확인",(d,n)->{
             String address=email.getText().toString().trim(),secret=password.getText().toString();
-            io.execute(()->{try{
+            submit(()->{try{
                 if(signup && secret.length()<8)throw new IOException("비밀번호는 8자 이상이어야 합니다.");
                 JSONObject body=new JSONObject().put("email",address).put("password",secret).put("returnSecureToken",true);
                 JSONObject result=json("https://identitytoolkit.googleapis.com/v1/accounts:"+(signup?"signUp":"signInWithPassword")+"?key="+BuildConfig.FIREBASE_API_KEY,"POST",body.toString(),null);
@@ -73,10 +100,16 @@ final class ProBilling implements PurchasesUpdatedListener {
         byte[] digest=MessageDigest.getInstance("SHA-256").digest(uid.getBytes(StandardCharsets.UTF_8));StringBuilder out=new StringBuilder();for(byte b:digest)out.append(String.format("%02x",b&255));return out.toString();
     }
     void buy(){
-        io.execute(()->{try{authenticate();api("/v1/config","GET",null);String hash=accountHash();app.runOnUiThread(()->queryAndBuy(hash));}catch(Exception e){app.toast(e.getMessage());}});
+        submit(()->{try{
+            authenticate();
+            JSONObject config=api("/v1/config","GET",null);
+            ProductConfiguration.requireMatchingProduct(BuildConfig.PRO_PRODUCT,config.optString("productId",""));
+            String hash=accountHash();app.runOnUiThread(()->queryAndBuy(hash));
+        }catch(Exception e){app.toast(e.getMessage());}});
     }
     private void queryAndBuy(String hash){
-        if(!billing.isReady()){app.toast("Google Play 연결을 확인한 후 다시 시도하세요.");return;}
+        if(closed||app.isFinishing()||app.isDestroyed())return;
+        // Billing 8 reconnects when this API is called while disconnected.
         QueryProductDetailsParams.Product product=QueryProductDetailsParams.Product.newBuilder().setProductId(BuildConfig.PRO_PRODUCT).setProductType(BillingClient.ProductType.SUBS).build();
         billing.queryProductDetailsAsync(QueryProductDetailsParams.newBuilder().setProductList(Collections.singletonList(product)).build(),(r,details)->{
             if(r.getResponseCode()!=BillingClient.BillingResponseCode.OK||details.getProductDetailsList().isEmpty()){app.toast("Play 상품을 불러오지 못했습니다: "+r.getResponseCode());return;}
@@ -84,15 +117,24 @@ final class ProBilling implements PurchasesUpdatedListener {
             List<ProductDetails.SubscriptionOfferDetails> offers=p.getSubscriptionOfferDetails();
             if(offers==null||offers.isEmpty()){app.toast("구매 가능한 구독이 없습니다.");return;}
             // Base plan only: do not silently choose trials or promotional offers.
-            ProductDetails.SubscriptionOfferDetails selected=null;for(var offer:offers)if(offer.getOfferId()==null){selected=offer;break;}
-            if(selected==null){app.toast("기본 구독 요금제를 사용할 수 없습니다.");return;}
+            ProductDetails.SubscriptionOfferDetails selected=null;
+            for(var offer:offers){
+                List<ProductDetails.PricingPhase> phases=offer.getPricingPhases().getPricingPhaseList();
+                if(SubscriptionPlanPolicy.supported(offer.getOfferId(),offer.getInstallmentPlanDetails()!=null,
+                        phases.size(),phases.size()==1 && phases.get(0).getRecurrenceMode()==ProductDetails.RecurrenceMode.INFINITE_RECURRING)){
+                    selected=offer;break;
+                }
+            }
+            if(closed||app.isFinishing()||app.isDestroyed())return;
+            if(selected==null){app.toast("일반 자동 갱신 기본 요금제를 사용할 수 없습니다.");return;}
             final String offerToken=selected.getOfferToken();StringBuilder terms=new StringBuilder();
             for(var phase:selected.getPricingPhases().getPricingPhaseList())terms.append(phase.getFormattedPrice()).append(" / ").append(phase.getBillingPeriod()).append("\n");
-            app.runOnUiThread(()->new AlertDialog.Builder(app).setTitle(p.getName()).setMessage("클라우드 영상 보관\n"+terms+"자동 갱신 구독입니다. Google Play에서 해지할 수 있습니다. 기존 무료 촬영·분석·저장은 유지됩니다.").setNegativeButton("취소",null).setPositiveButton("Google Play에서 구매",(d,n)->{
+            app.runOnUiThread(()->{if(closed||app.isFinishing()||app.isDestroyed())return;new AlertDialog.Builder(app).setTitle(p.getName()).setMessage("클라우드 영상 보관\n"+terms+"자동 갱신 구독입니다. Google Play에서 해지할 수 있습니다. 기존 무료 촬영·분석·저장은 유지됩니다.").setNegativeButton("취소",null).setPositiveButton("Google Play에서 구매",(d,n)->{
+                if(closed||app.isFinishing()||app.isDestroyed())return;
                 BillingFlowParams.ProductDetailsParams item=BillingFlowParams.ProductDetailsParams.newBuilder().setProductDetails(p).setOfferToken(offerToken).build();
                 BillingResult result=billing.launchBillingFlow(app,BillingFlowParams.newBuilder().setObfuscatedAccountId(hash).setProductDetailsParamsList(Collections.singletonList(item)).build());
                 if(result.getResponseCode()!=BillingClient.BillingResponseCode.OK)app.toast("구매 화면 오류: "+result.getResponseCode());
-            }).show());
+            }).show();});
         });
     }
     @Override public void onPurchasesUpdated(BillingResult r,List<Purchase> purchases){
@@ -102,14 +144,14 @@ final class ProBilling implements PurchasesUpdatedListener {
         else app.toast("구매 확인 오류: "+r.getResponseCode());
     }
     void restore(boolean visible){
-        if(closed||!billing.isReady())return;
+        if(closed)return;
         if(prefs.getString("refresh","").isEmpty()){if(visible)app.toast("먼저 Pro 계정에 로그인하세요.");return;}
         billing.queryPurchasesAsync(QueryPurchasesParams.newBuilder().setProductType(BillingClient.ProductType.SUBS).build(),(r,purchases)->{
             if(r.getResponseCode()==BillingClient.BillingResponseCode.OK)verify(purchases,visible);else if(visible)app.toast("구매 복원 오류: "+r.getResponseCode());
         });
     }
     private void verify(List<Purchase> purchases,boolean visible){
-        io.execute(()->{try{
+        submit(()->{try{
             authenticate();boolean pending=false;
             for(Purchase p:purchases){
                 if(!p.getProducts().contains(BuildConfig.PRO_PRODUCT))continue;
@@ -125,12 +167,12 @@ final class ProBilling implements PurchasesUpdatedListener {
         requireEntitlement();HttpURLConnection c=open(BuildConfig.API_BASE+"/v1/videos","POST",idToken);c.setRequestProperty("Content-Type",mime);c.setDoOutput(true);c.setFixedLengthStreamingMode(file.length());
         try{try(OutputStream out=c.getOutputStream();InputStream in=new FileInputStream(file)){copy(in,out);}response(c);}finally{c.disconnect();}
     }
-    private void listVideos(){io.execute(()->{try{
+    private void listVideos(){submit(()->{try{
         requireEntitlement();JSONArray videos=api("/v1/videos","GET",null).getJSONArray("videos");String[] names=new String[videos.length()];for(int i=0;i<names.length;i++)names[i]=videos.getJSONObject(i).getString("createdAt");
-        app.runOnUiThread(()->new AlertDialog.Builder(app).setTitle("클라우드 영상 · 선택하면 휴대폰 저장").setItems(names,(d,n)->io.execute(()->{try{requireEntitlement();JSONObject item=videos.getJSONObject(n);File f=File.createTempFile("cloud-",".tmp",app.getCacheDir());try{
+        app.runOnUiThread(()->{if(closed||app.isFinishing()||app.isDestroyed())return;new AlertDialog.Builder(app).setTitle("클라우드 영상 · 선택하면 휴대폰 저장").setItems(names,(d,n)->submit(()->{try{requireEntitlement();JSONObject item=videos.getJSONObject(n);File f=File.createTempFile("cloud-",".tmp",app.getCacheDir());try{
             HttpURLConnection c=open(BuildConfig.API_BASE+"/v1/videos/"+item.getString("id"),"GET",idToken);try{if(c.getResponseCode()!=200)throw new IOException("영상을 가져오지 못했습니다.");try(InputStream in=c.getInputStream();OutputStream out=new FileOutputStream(f)){copy(in,out);}}finally{c.disconnect();}
             app.saveVideo(f,item.getString("mime"));app.toast("휴대폰에 저장했습니다.");
-        }finally{f.delete();}}catch(Exception e){app.toast(e.getMessage());}})).setNegativeButton("닫기",null).show());
+        }finally{f.delete();}}catch(Exception e){app.toast(e.getMessage());}})).setNegativeButton("닫기",null).show();});
     }catch(Exception e){app.toast(e.getMessage());}});}
     private JSONObject api(String path,String method,String body)throws Exception{return json(BuildConfig.API_BASE+path,method,body,idToken);}
     static void copy(InputStream in,OutputStream out)throws IOException{byte[] b=new byte[32768];for(int n;(n=in.read(b))!=-1;)out.write(b,0,n);}
@@ -147,5 +189,5 @@ final class ProBilling implements PurchasesUpdatedListener {
         int code=c.getResponseCode();InputStream stream=code>=400?c.getErrorStream():c.getInputStream();ByteArrayOutputStream bytes=new ByteArrayOutputStream();if(stream!=null)try(InputStream in=stream){copy(in,bytes);}JSONObject result=bytes.size()==0?new JSONObject():new JSONObject(bytes.toString("UTF-8"));
         if(code<200||code>=300)throw new IOException("서버 확인 실패 ("+code+"): "+result.optString("detail","로그인 및 구독 상태를 확인하세요."));return result;
     }
-    void close(){closed=true;billing.endConnection();}
+    synchronized void close(){closed=true;tasks.close();billing.endConnection();}
 }

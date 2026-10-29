@@ -21,8 +21,30 @@ adb shell wm size 480x800
 adb shell wm density 160
 adb install -r -g ci-artifacts/outputs/apk/debug/app-debug.apk || exit 1
 adb install -r -g ci-artifacts/outputs/apk/androidTest/debug/app-debug-androidTest.apk || exit 1
-timeout 300 adb shell am instrument -w kr.co.tupgolf.svmobile.test/androidx.test.runner.AndroidJUnitRunner | tee android-evidence/instrumentation.txt
-sv_test_result=${PIPESTATUS[0]}
-# am instrument may exit zero even when an assertion fails; require explicit JUnit success.
-if ! grep -Eq 'OK \([0-9]+ tests?\)' android-evidence/instrumentation.txt; then exit 1; fi
+# Isolate each method in a fresh instrumented process. A blocked UI thread must
+# not prevent the remaining tests or hide which phase failed.
+sv_test_result=0
+for sv_method in aUnpaidCloudRequestDoesNotUpload bCanvasRecordingReplayAndNativeSave cCameraReplayAndMediaStoreRoundTrip; do
+  adb shell am force-stop kr.co.tupgolf.svmobile
+  # Budgets include all sequential stage maxima, startup and teardown.
+  # Camera: 60+60+120+30+60 seconds, plus direct callbacks and lifecycle.
+  case "$sv_method" in
+    a*) sv_method_budget=180 ;;
+    b*) sv_method_budget=300 ;;
+    c*) sv_method_budget=540 ;;
+  esac
+  echo "SV_SMOKE_START_METHOD=$sv_method budget=${sv_method_budget}s"
+  timeout "$sv_method_budget" adb shell am instrument -w -e class "kr.co.tupgolf.svmobile.AndroidSmokeTest#$sv_method" kr.co.tupgolf.svmobile.test/androidx.test.runner.AndroidJUnitRunner | tee "android-evidence/$sv_method.txt"
+  sv_command_result=${PIPESTATUS[0]}
+  if [ "$sv_command_result" -ne 0 ] || ! grep -Eq 'OK \([0-9]+ tests?\)' "android-evidence/$sv_method.txt"; then
+    sv_test_result=1
+    echo "SV_SMOKE_FAILED_METHOD=$sv_method exit=$sv_command_result"
+    timeout 15 adb shell dumpsys activity lastanr > "android-evidence/$sv_method-lastanr.txt"
+    timeout 15 adb shell dumpsys cpuinfo > "android-evidence/$sv_method-cpu.txt"
+    timeout 15 adb shell dumpsys meminfo > "android-evidence/$sv_method-memory.txt"
+    timeout 15 adb shell dumpsys media.camera > "android-evidence/$sv_method-camera.txt"
+    timeout 15 adb exec-out screencap -p > "android-evidence/$sv_method-screen.png"
+  fi
+done
+cat android-evidence/aUnpaidCloudRequestDoesNotUpload.txt android-evidence/bCanvasRecordingReplayAndNativeSave.txt android-evidence/cCameraReplayAndMediaStoreRoundTrip.txt > android-evidence/instrumentation.txt
 exit "$sv_test_result"

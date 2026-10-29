@@ -9,4 +9,21 @@ const money=m=>m?new Intl.NumberFormat('ko-KR',{style:'currency',currency:m.curr
 async function load(){try{const r=await fetch('/v1/admin/orders',{headers:{Authorization:'Bearer '+token}}),data=await r.json();if(!r.ok)throw Error(data.detail||'조회 실패');$('rows').replaceChildren();for(const item of data.orders){const o=item.googleOrder||{},tr=document.createElement('tr');for(const value of [item.order_id,o.state||'정보 없음',money(o.total),money(o.developerRevenueInBuyerCurrency),JSON.stringify(o.orderHistory||{})]){const td=document.createElement('td');td.textContent=value;tr.append(td);}$('rows').append(tr);}$('status').textContent=data.orders.length+'개 주문 · '+new Date().toLocaleString('ko-KR')+' 조회';}catch(e){$('status').textContent=e.message;}}
 $('login').onsubmit=async e=>{e.preventDefault();try{const c=await(await fetch('/v1/auth-config')).json();if(!c.apiKey)throw Error('계정 인증 연결이 필요합니다.');const r=await fetch('https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key='+encodeURIComponent(c.apiKey),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('email').value,password:$('password').value,returnSecureToken:true})}),data=await r.json();$('password').value='';if(!r.ok)throw Error('로그인 실패');token=data.idToken;$('login').hidden=true;$('refresh').hidden=$('logout').hidden=false;await load();}catch(e){$('status').textContent=e.message;}};
 $('refresh').onclick=load;$('logout').onclick=()=>{token='';$('rows').replaceChildren();$('login').hidden=false;$('refresh').hidden=$('logout').hidden=true;$('status').textContent='로그아웃했습니다.';};
+</script>
+<h2>계정 삭제 요청 접수 내역</h2>
+<p>이 목록은 접수 내역입니다. 계정·영상 삭제나 구독 취소를 실행하지 않습니다.</p>
+<button id="deletionRefresh">삭제 요청 조회</button><p id="deletionStatus" role="status"></p>
+<div style="overflow:auto"><table><thead><tr><th>접수 번호</th><th>계정 UID</th><th>요청 시각</th><th>처리 상태</th></tr></thead><tbody id="deletionRows"></tbody></table></div>
+<script>
+$('deletionRefresh').onclick=async()=>{
+ try{
+  if(!token)throw Error('운영자 계정으로 먼저 로그인하세요.');
+  const response=await fetch('/v1/admin/account-deletion-requests',{headers:{Authorization:'Bearer '+token},cache:'no-store'}),result=await response.json();
+  if(!response.ok)throw Error(result.detail||'조회 실패');
+  $('deletionRows').replaceChildren();
+  for(const item of result.requests){const tr=document.createElement('tr');for(const value of [item.requestId,item.uid,item.requestedAt,item.status==='RECEIVED'?'접수 · 처리 대기':item.status]){const td=document.createElement('td');td.textContent=value;tr.append(td);}$('deletionRows').append(tr);}
+  $('deletionStatus').textContent=result.requests.length+'개 접수 · 실제 삭제 완료 여부는 별도 확인이 필요합니다.';
+ }catch(error){$('deletionStatus').textContent=error.message;}
+};
+$('logout').addEventListener('click',()=>{$('deletionRows').replaceChildren();$('deletionStatus').textContent='';});
 </script></html>

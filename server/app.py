@@ -12,11 +12,11 @@ from datetime import datetime, timezone
 from urllib.parse import quote
 
 from fastapi import FastAPI, Depends, Header, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from google.auth.transport.requests import Request as GoogleRequest, AuthorizedSession
 from google.oauth2 import id_token
 import google.auth
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool, ConfigDict, field_validator
 
 app = FastAPI(title="SV MOBILE Pro", docs_url=None, redoc_url=None)
 ROOT = Path(os.environ.get("SV_DATA_DIR", "./data"))
@@ -47,6 +47,9 @@ def db():
         size INTEGER NOT NULL, created TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS notifications (
         message_id TEXT PRIMARY KEY, received REAL NOT NULL);
+    CREATE TABLE IF NOT EXISTS account_deletion_requests (
+        request_id TEXT PRIMARY KEY, uid TEXT NOT NULL UNIQUE,
+        requested_at TEXT NOT NULL, status TEXT NOT NULL CHECK(status='RECEIVED'));
     """)
     return c
 
@@ -173,6 +176,49 @@ def pro_user(uid=Depends(user)):
 
 class Receipt(BaseModel):
     purchaseToken: str = Field(min_length=8, max_length=4096)
+
+
+class AccountDeletionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirm: StrictBool
+
+    @field_validator("confirm")
+    @classmethod
+    def explicitly_confirmed(cls, value):
+        if value is not True:
+            raise ValueError("계정 및 관련 데이터 삭제 요청을 확인해야 합니다.")
+        return value
+
+
+@app.post("/v1/account-deletion-requests")
+def request_account_deletion(request: AccountDeletionRequest, uid=Depends(user)):
+    """Receipt only. Never delete data or cancel a Play subscription here."""
+    c = db()
+    try:
+        with c:
+            c.execute("INSERT OR IGNORE INTO account_deletion_requests VALUES (?,?,?,?)",
+                      (uuid.uuid4().hex, uid, datetime.now(timezone.utc).isoformat(), "RECEIVED"))
+            row = c.execute("SELECT request_id,requested_at,status FROM account_deletion_requests WHERE uid=?", (uid,)).fetchone()
+    finally:
+        c.close()
+    return JSONResponse({"requestId": row["request_id"], "requestedAt": row["requested_at"],
+                         "status": row["status"], "deletionCompleted": False,
+                         "message": "삭제 요청을 접수했습니다. 계정과 데이터 삭제는 아직 완료되지 않았습니다. Google Play 구독은 별도로 관리하세요."},
+                        headers={"Cache-Control": "no-store"})
+
+
+@app.get("/v1/admin/account-deletion-requests")
+def account_deletion_requests(uid=Depends(user)):
+    if uid not in ADMIN_UIDS:
+        raise HTTPException(403, "운영자 권한이 필요합니다.")
+    c = db()
+    try:
+        rows = c.execute("SELECT request_id AS requestId,uid,requested_at AS requestedAt,status FROM account_deletion_requests ORDER BY requested_at DESC LIMIT 500").fetchall()
+    finally:
+        c.close()
+    return JSONResponse({"requests": [dict(r) for r in rows],
+                         "note": "접수 내역입니다. 실제 삭제 처리와 구독 취소는 이 API에서 실행하지 않습니다."},
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/health")
@@ -349,3 +395,12 @@ def operator():
 @app.get("/v1/auth-config")
 def auth_config():
     return {"apiKey": os.environ.get("SV_FIREBASE_API_KEY", "")}
+
+
+@app.get("/account-deletion", response_class=HTMLResponse)
+def account_deletion_page():
+    return HTMLResponse((Path(__file__).parent / "account-deletion.html").read_text(), headers={
+        "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+        "Content-Security-Policy": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' https://identitytoolkit.googleapis.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+    })
