@@ -1958,6 +1958,7 @@ $('disconnect').onclick=()=>{
 
   window.svLoadCapturedSide=function(blob){
     latestSideBlob=blob;
+    vzNewShot();
     if(sideReplay.src)URL.revokeObjectURL(sideReplay.src);
     sideReplay.src=URL.createObjectURL(blob);sideReplay.loop=true;sideReplay.muted=true;sideReplay.load();
     sideReplay.onloadedmetadata=()=>{
@@ -1984,6 +1985,7 @@ $('disconnect').onclick=()=>{
     sideRecorder.onstop=()=>{
       if(!sideChunks.length) return;
       latestSideBlob=new Blob(sideChunks,{type:sideRecorder.mimeType||'video/webm'});
+      vzNewShot();
       if(sideReplay.src) URL.revokeObjectURL(sideReplay.src);
       sideReplay.src=URL.createObjectURL(latestSideBlob);
       sideReplay.loop=true;
@@ -2003,6 +2005,93 @@ $('disconnect').onclick=()=>{
     // The front camera ends both recordings after the detected swing.
   };
 
+  /* V-zone: per-shot blue translucent replay overlay. Manual calibration only:
+     neck, shaft direction and ball are not inferred from unmeasured pixels. */
+  const vzCanvas=document.createElement('canvas');
+  vzCanvas.id='svSideVZoneCanvas';
+  vzCanvas.style.cssText='position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:8';
+  const vzStage=byId('sideVideoStage');
+  if(getComputedStyle(vzStage).position==='static')vzStage.style.position='relative';
+  vzStage.appendChild(vzCanvas);
+  const vzCtx=vzCanvas.getContext('2d');
+  let vzShot=null,vzDraft=null,vzMode=false;
+  const vzButton=document.createElement('button');
+  vzButton.id='svSideVZoneBtn';vzButton.type='button';vzButton.className='dark';
+  vzButton.textContent='V존 설정';
+  byId('sideRotateBtn').insertAdjacentElement('afterend',vzButton);
+  const vzHint=document.createElement('div');
+  vzHint.id='svSideVZoneHint';vzHint.style.cssText='font-size:12px;color:#90caf9;padding:4px 8px;display:none';
+  vzHint.textContent='영상에서 목 → 공 → 샤프트 방향의 점을 차례로 선택하세요.';
+  vzButton.parentElement.insertAdjacentElement('afterend',vzHint);
+  function vzMapPoint(p,w,h){
+    const deg=((window.svSideRotation??90)%360+360)%360;
+    const sw=sideReplay.videoWidth,sh=sideReplay.videoHeight;
+    if(!sw||!sh)return null;
+    const rotated=deg===90||deg===270;
+    const scale=Math.min(w/(rotated?sh:sw),h/(rotated?sw:sh));
+    const x=(p.x-.5)*sw*scale,y=(p.y-.5)*sh*scale;
+    const a=deg*Math.PI/180;
+    return {x:w/2+x*Math.cos(a)-y*Math.sin(a),y:h/2+x*Math.sin(a)+y*Math.cos(a)};
+  }
+  function vzUnmapPoint(x,y,w,h){
+    const deg=((window.svSideRotation??90)%360+360)%360;
+    const sw=sideReplay.videoWidth,sh=sideReplay.videoHeight;
+    if(!sw||!sh)return null;
+    const rotated=deg===90||deg===270;
+    const scale=Math.min(w/(rotated?sh:sw),h/(rotated?sw:sh));
+    const a=-deg*Math.PI/180,dx=x-w/2,dy=y-h/2;
+    const px=(dx*Math.cos(a)-dy*Math.sin(a))/(sw*scale)+.5;
+    const py=(dx*Math.sin(a)+dy*Math.cos(a))/(sh*scale)+.5;
+    return px>=0&&px<=1&&py>=0&&py<=1?{x:px,y:py}:null;
+  }
+  vzButton.addEventListener('click',()=>{
+    if(!sideReplay.videoWidth){vzHint.style.display='block';vzHint.textContent='먼저 측면 스윙 영상을 촬영하세요.';return;}
+    vzMode=!vzMode;vzDraft=[];vzButton.textContent=vzMode?'V존 점 선택 중':'V존 설정';
+    vzCanvas.style.pointerEvents=vzMode?'auto':'none';
+    vzHint.style.display=vzMode?'block':'none';
+    vzHint.textContent='영상에서 목 → 공 → 샤프트 방향의 점을 차례로 선택하세요.';
+  });
+  vzCanvas.addEventListener('pointerdown',e=>{
+    if(!vzMode)return;
+    const rect=vzCanvas.getBoundingClientRect();
+    const p=vzUnmapPoint(e.clientX-rect.left,e.clientY-rect.top,rect.width,rect.height);
+    if(!p)return;
+    vzDraft.push(p);
+    if(vzDraft.length===3){
+      vzShot={neck:vzDraft[0],ball:vzDraft[1],shaft:vzDraft[2]};
+      vzMode=false;vzDraft=null;vzCanvas.style.pointerEvents='none';
+      vzButton.textContent='V존 재설정';vzHint.style.display='none';
+    }else vzHint.textContent=vzDraft.length===1?'공 위치를 선택하세요.':'샤프트 방향의 점을 선택하세요.';
+  });
+  function vzDraw(){
+    const rect=vzCanvas.getBoundingClientRect(),w=Math.max(1,Math.round(rect.width)),h=Math.max(1,Math.round(rect.height));
+    if(vzCanvas.width!==w||vzCanvas.height!==h){vzCanvas.width=w;vzCanvas.height=h;}
+    vzCtx.clearRect(0,0,w,h);
+    const points=vzShot?[vzShot.neck,vzShot.ball,vzShot.shaft]:vzDraft;
+    if(!points||!points.length)return;
+    const mapped=points.map(p=>vzMapPoint(p,w,h));
+    if(mapped.some(p=>!p))return;
+    vzCtx.lineWidth=2.5;vzCtx.strokeStyle='rgba(33,150,243,0.65)';
+    vzCtx.lineCap='round';
+    if(vzShot){
+      const [neck,ball,shaft]=mapped;
+      // Lower ray follows the measured address shaft through the ball.
+      const dx=ball.x-shaft.x,dy=ball.y-shaft.y;
+      const len=Math.hypot(dx,dy);
+      if(len>3){
+        const reach=Math.max(w,h)*2;
+        vzCtx.beginPath();vzCtx.moveTo(ball.x,ball.y);vzCtx.lineTo(ball.x-dx/len*reach,ball.y-dy/len*reach);vzCtx.stroke();
+      }
+      vzCtx.beginPath();vzCtx.moveTo(ball.x,ball.y);
+      const ux=neck.x-ball.x,uy=neck.y-ball.y,ul=Math.hypot(ux,uy);
+      if(ul>3)vzCtx.lineTo(ball.x+ux/ul*Math.max(w,h)*2,ball.y+uy/ul*Math.max(w,h)*2);
+      vzCtx.stroke();
+    }else{
+      for(const p of mapped){vzCtx.beginPath();vzCtx.arc(p.x,p.y,4,0,Math.PI*2);vzCtx.stroke();}
+    }
+  }
+  function vzNewShot(){vzShot=null;vzDraft=null;vzMode=false;vzCanvas.style.pointerEvents='none';vzButton.textContent='V존 설정';vzHint.style.display='none';}
+  window.svSideVZoneNewShot=vzNewShot;
   /* ---------- 측면 리플레이: cover + 원본비율 유지 ---------- */
   function drawSideReplay(){
     if(sideReplay.videoWidth && sideReplay.readyState>=2){
@@ -2027,6 +2116,7 @@ $('disconnect').onclick=()=>{
       sideCtx.drawImage(sideReplay,-sw*scale/2,-sh*scale/2,sw*scale,sh*scale);
       sideCtx.restore();
     }
+    vzDraw();
     requestAnimationFrame(drawSideReplay);
   }
   drawSideReplay();
