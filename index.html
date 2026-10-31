@@ -3467,32 +3467,39 @@ body #svCompactViewDock #svGhostButton{
 </div></div>
 <script id="svProSettingsScript">
 (()=>{'use strict';
-const $=id=>document.getElementById(id), panel=$('svProSettingsPanel'),video=$('replay');
-if(!panel||!video)return;
-const defaults={speed:'0.5',repeat:'5',audio:false,loop:false};
+const $=id=>document.getElementById(id),panel=$('svProSettingsPanel'),video=$('replay'),speedControl=$('svAutoReplaySpeed');
+if(!panel||!video||!speedControl)return;
+const defaults={repeat:'5',audio:false,loop:false};
 let settings={...defaults};
-try{const v=JSON.parse(localStorage.getItem('sv_mobile_pro_settings_v1')||'null');if(v&&typeof v==='object')settings={...defaults,...v};}catch(e){}
-if(!['0.1','0.25','0.5','0.75','1'].includes(String(settings.speed)))settings.speed='0.5';
+try{const stored=JSON.parse(localStorage.getItem('sv_mobile_pro_settings_v2')||'null');if(stored&&typeof stored==='object')settings={...defaults,...stored};}catch(e){}
 if(!['1','3','5','0'].includes(String(settings.repeat)))settings.repeat='5';
-let playCount=0;
-const save=()=>{try{localStorage.setItem('sv_mobile_pro_settings_v1',JSON.stringify(settings));}catch(e){}};
-const apply=()=>{video.muted=!settings.audio;video.playbackRate=Number(settings.speed);};
-for(const [field,id] of [['speed','svproSpeed'],['repeat','svproRepeat'],['audio','svproAudio'],['loop','svproLoop']]){
- const el=$(id);if(!el)continue;
- if(el.type==='checkbox')el.checked=!!settings[field];else el.value=String(settings[field]);
- el.addEventListener('change',()=>{settings[field]=el.type==='checkbox'?el.checked:el.value;playCount=0;save();apply();});
+const save=()=>{try{localStorage.setItem('sv_mobile_pro_settings_v2',JSON.stringify(settings));}catch(e){}};
+let completed=0;
+const sync=()=>{
+ video.muted=!settings.audio;
+ video.loop=!!settings.loop&&settings.repeat==='0';
+ $('svproSpeed').value=speedControl.value;
+};
+$('svproSpeed').value=speedControl.value;
+$('svproRepeat').value=settings.repeat;
+$('svproAudio').checked=!!settings.audio;
+$('svproLoop').checked=!!settings.loop;
+$('svproSpeed').addEventListener('change',e=>{speedControl.value=e.target.value;speedControl.dispatchEvent(new Event('change',{bubbles:true}));video.playbackRate=Number(speedControl.value);});
+speedControl.addEventListener('change',()=>{$('svproSpeed').value=speedControl.value;});
+for(const [id,key] of [['svproRepeat','repeat'],['svproAudio','audio'],['svproLoop','loop']]){
+ $(id).addEventListener('change',e=>{settings[key]=e.target.type==='checkbox'?e.target.checked:e.target.value;completed=0;save();sync();});
 }
 $('svProSettingsBtn').addEventListener('click',()=>panel.classList.add('open'));
 $('svProSettingsClose').addEventListener('click',()=>panel.classList.remove('open'));
 panel.addEventListener('click',e=>{if(e.target===panel)panel.classList.remove('open');});
-video.addEventListener('play',()=>{if(video.currentTime<0.15)playCount=0;apply();});
+video.addEventListener('loadedmetadata',()=>{completed=0;sync();});
+video.addEventListener('play',()=>{sync();});
 video.addEventListener('ended',()=>{
- if(!settings.loop)return;
- playCount++;
- const limit=Number(settings.repeat);
- if(limit===0||playCount<limit){video.currentTime=0;video.play().catch(()=>{});}
+ if(!settings.loop||settings.repeat==='0')return;
+ completed++;
+ if(completed<Number(settings.repeat)){video.currentTime=0;video.play().catch(()=>{});}
 });
-apply();
+sync();
 })();
 </script>
 
