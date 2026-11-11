@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SV MOBILE 계정 삭제 요청</title>
+<style>body{font:16px system-ui;max-width:640px;margin:36px auto;padding:20px;background:#10251e;color:#edf7f0}h1{font-size:28px}p{line-height:1.7}label{display:block;margin:18px 0}input:not([type=checkbox]),button{box-sizing:border-box;width:100%;padding:13px;margin-top:8px;font:inherit;border:1px solid #739383;border-radius:8px}button{background:#c4ed77;color:#10251e;cursor:pointer}button:disabled{opacity:.55}a{color:#c4ed77}#status{white-space:pre-wrap}small{color:#c3d6ca}</style>
+<h1>SV MOBILE 계정 삭제 요청</h1>
+<p>T.UP GOLF ACADEMY의 SV MOBILE 계정과 연결된 클라우드 영상·계정 데이터의 삭제를 요청하는 페이지입니다. 앱을 다시 설치하지 않아도 요청할 수 있습니다.</p>
+<p><strong>요청 접수와 삭제 완료는 다릅니다.</strong> 이 페이지는 요청을 접수합니다. 실제 삭제 처리는 운영자 확인이 필요하며, 접수만으로 계정이나 영상이 즉시 삭제되지 않습니다.</p>
+<p>이 요청은 Google Play 구독 취소나 환불을 실행하지 않습니다. 구독 상태는 <a href="https://play.google.com/store/account/subscriptions?sku=sv_mobile_pro&amp;package=kr.co.tupgolf.svmobile" target="_blank" rel="noopener">Google Play 구독 관리</a>에서 별도로 확인하세요. 이 기기에 저장한 영상도 자동으로 지워지지 않습니다.</p>
+<form id="request">
+ <label>가입한 이메일<input id="email" type="email" autocomplete="username" required></label>
+ <label>비밀번호<input id="password" type="password" autocomplete="current-password" required></label>
+ <label><input id="confirm" type="checkbox" required> 본인 계정과 연결된 클라우드 영상·계정 데이터의 삭제를 요청합니다.</label>
+ <button id="submit">계정 삭제 요청 접수</button>
+</form>
+<p id="status" role="status" aria-live="polite">계정 확인 후 요청을 접수합니다. 활성 PRO 구독은 필요하지 않습니다.</p>
+<small>비밀번호는 Google Firebase 인증에 사용되며 이 접수 서버에 저장하지 않습니다.</small>
+<script>
+const $=id=>document.getElementById(id);
+$('request').addEventListener('submit',async event=>{
+ event.preventDefault();if(!$('confirm').checked)return;
+ $('submit').disabled=true;$('status').textContent='본인 계정을 확인하고 있습니다…';
+ let token='';
+ try{
+  const configResponse=await fetch('/v1/auth-config',{cache:'no-store'});
+  const config=await configResponse.json();
+  if(!configResponse.ok||!config.apiKey)throw Error('계정 인증 연결 전입니다. 아직 요청을 접수하지 않았습니다.');
+  const loginResponse=await fetch('https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key='+encodeURIComponent(config.apiKey),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('email').value.trim(),password:$('password').value,returnSecureToken:true})});
+  const login=await loginResponse.json();$('password').value='';
+  if(!loginResponse.ok||!login.idToken)throw Error('로그인하지 못했습니다. 이메일과 비밀번호를 확인하세요. 요청은 접수되지 않았습니다.');
+  token=login.idToken;
+  const response=await fetch('/v1/account-deletion-requests',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({confirm:true})});
+  const result=await response.json();
+  if(!response.ok||!result.requestId||result.status!=='RECEIVED'||result.deletionCompleted!==false)throw Error('요청 접수 상태를 확인하지 못했습니다. 운영자에게 확인하세요.');
+  $('status').textContent='삭제 요청이 접수되었습니다.\n접수 번호: '+result.requestId+'\n처리 상태: 운영자 확인 대기\n계정·영상 삭제가 완료됐다는 뜻은 아닙니다.';
+  $('request').reset();
+ }catch(error){$('status').textContent=error.message;}
+ finally{token='';$('password').value='';$('submit').disabled=false;}
+});
+</script></html>

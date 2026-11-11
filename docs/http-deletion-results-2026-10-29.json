@@ -1,0 +1,64 @@
+{
+  "receipt": [
+    200,
+    {
+      "requestId": "17799a8c71a04c3e86b625f208ba1e14",
+      "requestedAt": "2026-10-29T04:17:44.638290+00:00",
+      "status": "RECEIVED",
+      "deletionCompleted": false,
+      "message": "삭제 요청을 접수했습니다. 계정과 데이터 삭제는 아직 완료되지 않았습니다. Google Play 구독은 별도로 관리하세요."
+    }
+  ],
+  "idempotent": [
+    200,
+    {
+      "requestId": "17799a8c71a04c3e86b625f208ba1e14",
+      "requestedAt": "2026-10-29T04:17:44.638290+00:00",
+      "status": "RECEIVED",
+      "deletionCompleted": false,
+      "message": "삭제 요청을 접수했습니다. 계정과 데이터 삭제는 아직 완료되지 않았습니다. Google Play 구독은 별도로 관리하세요."
+    }
+  ],
+  "unauthenticated": [
+    401,
+    {
+      "detail": "test authentication required"
+    }
+  ],
+  "uidInjection": [
+    422,
+    {
+      "detail": [
+        {
+          "type": "extra_forbidden",
+          "loc": [
+            "body",
+            "uid"
+          ],
+          "msg": "Extra inputs are not permitted",
+          "input": "victim"
+        }
+      ]
+    }
+  ],
+  "userAdminDenied": [
+    403,
+    {
+      "detail": "운영자 권한이 필요합니다."
+    }
+  ],
+  "adminView": [
+    200,
+    {
+      "requests": [
+        {
+          "requestId": "17799a8c71a04c3e86b625f208ba1e14",
+          "uid": "user-a",
+          "requestedAt": "2026-10-29T04:17:44.638290+00:00",
+          "status": "RECEIVED"
+        }
+      ],
+      "note": "접수 내역입니다. 실제 삭제 처리와 구독 취소는 이 API에서 실행하지 않습니다."
+    }
+  ]
+}

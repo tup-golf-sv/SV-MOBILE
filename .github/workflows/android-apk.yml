@@ -1,0 +1,109 @@
+name: Android APK build
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Use installed Android SDK
+        run: |
+          SDKMGR=$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' -type f | head -n 1)
+          "$SDKMGR" --install 'platforms;android-36' 'build-tools;35.0.0' 
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test server entitlement enforcement
+        run: |
+          pip install -r server/requirements.txt
+          python -m pytest server/tests -q
+          node scripts/tests/account-deletion-ui.cjs
+      - name: Test product configuration guard
+        run: |
+          mkdir -p /tmp/sv-product-test
+          javac -d /tmp/sv-product-test androidapp/app/src/main/java/kr/co/tupgolf/svmobile/ProductConfiguration.java scripts/tests/ProductConfigurationTest.java
+          java -cp /tmp/sv-product-test kr.co.tupgolf.svmobile.ProductConfigurationTest
+          javac -d /tmp/sv-product-test androidapp/app/src/main/java/kr/co/tupgolf/svmobile/SubscriptionPlanPolicy.java androidapp/app/src/main/java/kr/co/tupgolf/svmobile/LifecycleTasks.java scripts/tests/BillingPolicyRegression.java
+          java -cp /tmp/sv-product-test kr.co.tupgolf.svmobile.BillingPolicyRegression
+      - name: Compile APK, AAB and instrumentation tests
+        working-directory: androidapp
+        env:
+          SV_API_BASE: ${{ vars.SV_API_BASE }}
+          SV_FIREBASE_API_KEY: ${{ vars.SV_FIREBASE_API_KEY }}
+        run: gradle --no-daemon assembleDebug bundleRelease assembleDebugAndroidTest lintDebug
+      - name: Verify APK signature and original web source
+        run: |
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs androidapp/app/build/outputs/apk/debug/app-debug.apk
+          cmp index.html androidapp/app/src/main/assets/index.html
+          sha256sum androidapp/app/build/outputs/apk/debug/app-debug.apk > androidapp/app/build/outputs/apk/debug/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sv-mobile-debug-apk
+          path: |
+            androidapp/app/build/outputs/apk/debug/*
+            androidapp/app/build/outputs/apk/androidTest/debug/*.apk
+            androidapp/app/build/outputs/bundle/release/*.aab
+            androidapp/app/build/reports/lint-results-debug.html
+  android-smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - uses: actions/download-artifact@v4
+        with:
+          name: sv-mobile-debug-apk
+          path: androidapp/ci-artifacts
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Start virtual display for Mesa
+        run: |
+          if ! command -v Xvfb >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y xvfb libgl1-mesa-dri
+          fi
+          Xvfb :99 -screen 0 1024x768x24 > /tmp/sv-xvfb.log 2>&1 &
+          echo 'DISPLAY=:99' >> "$GITHUB_ENV"
+      - uses: reactivecircus/android-emulator-runner@v2
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        with:
+          api-level: 36
+          arch: x86_64
+          target: default
+          profile: pixel_2
+          emulator-options: -no-window -gpu host -feature -Vulkan -no-snapshot -memory 3072 -cores 4 -skin 480x800 -noaudio -no-boot-anim -camera-back emulated -camera-front emulated
+          emulator-boot-timeout: 180
+          disable-animations: true
+          working-directory: androidapp
+          script: bash ../scripts/android-smoke.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-emulator-test-results
+          path: |
+            androidapp/android-evidence/
