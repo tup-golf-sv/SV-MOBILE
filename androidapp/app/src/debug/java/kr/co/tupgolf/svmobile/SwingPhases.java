@@ -44,16 +44,21 @@ final class SwingPhases {
     private static Result detect(List<Sample> samples, int speed) {
         Result best = null;
         double bestExcursion = 0;
-        for (int address = 2; address + 8 < samples.size(); address++) {
+        for (int address = 2; address + Math.max(8, 2 * speed) < samples.size(); address++) {
             Sample origin = samples.get(address);
             Sample prior = samples.get(address - 2);
             if (origin == null || prior == null || origin.ms - prior.ms > 220
                     || distance(origin, prior) > .11
                     || distance(origin, samples.get(address - 1)) > .09) continue;
+            int moving = address + speed;
+            int established = address + 2 * speed;
+            if (samples.get(moving) == null || samples.get(established) == null
+                    || distance(origin, samples.get(moving)) < .13
+                    || distance(origin, samples.get(established)) < .19) continue;
             int takeaway = address + 1;
-            if (samples.get(takeaway) == null || samples.get(takeaway + 1) == null
-                    || distance(origin, samples.get(takeaway)) < .13
-                    || distance(origin, samples.get(takeaway + 1)) < .19) continue;
+            while (takeaway < moving && samples.get(takeaway) != null
+                    && distance(origin, samples.get(takeaway)) < .08) takeaway++;
+            if (samples.get(takeaway) == null) continue;
 
             int top = -1;
             double excursion = .55;

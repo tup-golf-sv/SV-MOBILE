@@ -18,6 +18,14 @@ final class SwingAnalysisRegression {
         require(first.time(SwingPhases.Phase.IMPACT, normal) == 600, "first impact time");
         require(second.time(SwingPhases.Phase.IMPACT, mirrored) == 900, "second impact time");
         require(first.tempo == 1.5 && second.tempo == 1.5, "normalized tempo");
+        double[] slowMotion = new double[(swing.length - 1) * 4 + 1];
+        for (int i = 0; i < slowMotion.length; i++) {
+            int a = i / 4, b = Math.min(a + 1, swing.length - 1);
+            slowMotion[i] = swing[a] + (swing[b] - swing[a]) * ((i % 4) / 4.0);
+        }
+        var slow = SwingPhases.detect(samples(slowMotion, 50, 1));
+        require(slow != null && Math.abs(slow.frames[SwingPhases.Phase.IMPACT.ordinal()] - 48) <= 3,
+                "slow-motion fallback retains impact location");
         require(SwingPhases.detect(samples(new double[30], 50, 1)) == null, "still frame");
         require(SwingPhases.detect(samples(Arrays.copyOf(swing, 14), 50, 1)) == null, "no finish");
         normal.set(9, null);
