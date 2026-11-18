@@ -44,9 +44,9 @@ public final class SwingAnalysisSmokeTest {
             assertTrue("Missing fixture " + name, file.isFile());
             SwingVideoAnalyzer.Result result = SwingVideoAnalyzer.analyze(
                     app, Uri.fromFile(file), progress -> {});
-            Log.i("SwingAnalysisTest", name + " pose=" + result.valid + "/" + result.samples
+            Log.i("SwingAnalysisTest", name + " decoded=" + result.decoded + " pose=" + result.valid + "/" + result.samples
                     + " phases=" + Arrays.toString(result.times) + " shafts=" + result.shafts);
-            assertTrue("Video frames must be decoded", result.samples > 0);
+            assertTrue("Video frames must be decoded", result.decoded > 0);
             if (name.startsWith("blank")) {
                 assertEquals("Blank video has no golfer", 0, result.valid);
                 assertNull(result.phases);

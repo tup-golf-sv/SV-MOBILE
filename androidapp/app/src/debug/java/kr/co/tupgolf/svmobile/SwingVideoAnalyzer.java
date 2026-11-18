@@ -37,13 +37,14 @@ final class SwingVideoAnalyzer {
         final SwingPhases.Result phases;
         final Bitmap[] previews;
         final long[] times;
-        final int samples, valid, shafts;
+        final int samples, decoded, valid, shafts;
         Result(SwingPhases.Result phases, Bitmap[] previews, long[] times, int samples,
-               int valid, int shafts) {
+               int decoded, int valid, int shafts) {
             this.phases = phases;
             this.previews = previews;
             this.times = times;
             this.samples = samples;
+            this.decoded = decoded;
             this.valid = valid;
             this.shafts = shafts;
         }
@@ -62,7 +63,8 @@ final class SwingVideoAnalyzer {
 
     static Result analyze(Context context, Uri uri, IntConsumer progress) throws Exception {
         PoseDetectorOptions options = new PoseDetectorOptions.Builder()
-                .setDetectorMode(PoseDetectorOptions.SINGLE_IMAGE_MODE).build();
+                .setDetectorMode(PoseDetectorOptions.SINGLE_IMAGE_MODE)
+                .setPreferredHardwareConfigs(PoseDetectorOptions.CPU).build();
         try (MediaMetadataRetriever retriever = new MediaMetadataRetriever();
                 PoseDetector detector = PoseDetection.getClient(options)) {
             retriever.setDataSource(context, uri);
@@ -72,6 +74,8 @@ final class SwingVideoAnalyzer {
             if (duration < 650 || duration > MAX_MS) {
                 throw new IllegalArgumentException("0.65~12초 길이의 스윙 영상 한 개를 선택하세요.");
             }
+            progress.accept(-1);
+            Tasks.await(detector.getInitTask(), 90, TimeUnit.SECONDS);
             return scan(retriever, detector, duration, progress);
         }
     }
@@ -105,49 +109,47 @@ final class SwingVideoAnalyzer {
                                long duration, IntConsumer progress) throws Exception {
         List<PoseFrame> frames = new ArrayList<>();
         List<SwingPhases.Sample> samples = new ArrayList<>();
-        int valid = 0;
+        int valid = 0, decoded = 0;
         int[] pixels = new int[0];
         float bodyScale = 0;
         for (long time = 0; time < duration; time += STEP_MS) {
             if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
             Bitmap bitmap = frameAt(retriever, time);
             PoseFrame frame = null;
-            try {
-                if (bitmap != null) {
-                    Pose pose = Tasks.await(detector.process(InputImage.fromBitmap(bitmap, 0)),
-                            15, TimeUnit.SECONDS);
-                    PointF[] points = points(pose, bitmap.getWidth(), bitmap.getHeight());
-                    PointF hips = midpoint(points[23], points[24]);
-                    PointF shoulders = midpoint(points[11], points[12]);
-                    PointF grip = midpoint(points[15], points[16]);
-                    if (hips != null && shoulders != null && grip != null) {
-                        float body = (float) Math.hypot(shoulders.x - hips.x, shoulders.y - hips.y);
-                        if (body >= 24) {
-                            if (bodyScale == 0) bodyScale = body;
-                            float scale = Math.max(bodyScale * .70f, Math.min(body, bodyScale * 1.30f));
-                            bodyScale = .94f * bodyScale + .06f * scale;
-                            SwingPhases.Sample sample = new SwingPhases.Sample(time,
-                                    (grip.x - hips.x) / bodyScale, (grip.y - hips.y) / bodyScale);
-                            PoseFrame previous = frames.isEmpty() ? null : frames.get(frames.size() - 1);
-                            int width = bitmap.getWidth(), height = bitmap.getHeight();
-                            if (pixels.length < width * height) pixels = new int[width * height];
-                            bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
-                            ShaftTracker.Line line = ShaftTracker.find(pixels, width, height,
-                                    grip.x, grip.y, bodyScale, previous == null ? null : previous.line);
-                            frame = new PoseFrame(points, sample, line);
-                            valid++;
-                        }
+            if (bitmap != null) {
+                decoded++;
+                // The detector can still hold the bitmap after an interruption or timeout.
+                Pose pose = Tasks.await(detector.process(InputImage.fromBitmap(bitmap, 0)),
+                        decoded == 1 ? 60 : 30, TimeUnit.SECONDS);
+                PointF[] points = points(pose, bitmap.getWidth(), bitmap.getHeight());
+                PointF hips = midpoint(points[23], points[24]);
+                PointF shoulders = midpoint(points[11], points[12]);
+                PointF grip = midpoint(points[15], points[16]);
+                if (hips != null && shoulders != null && grip != null) {
+                    float body = (float) Math.hypot(shoulders.x - hips.x, shoulders.y - hips.y);
+                    if (body >= 24) {
+                        if (bodyScale == 0) bodyScale = body;
+                        float scale = Math.max(bodyScale * .70f, Math.min(body, bodyScale * 1.30f));
+                        bodyScale = .94f * bodyScale + .06f * scale;
+                        SwingPhases.Sample sample = new SwingPhases.Sample(time,
+                                (grip.x - hips.x) / bodyScale, (grip.y - hips.y) / bodyScale);
+                        PoseFrame previous = frames.isEmpty() ? null : frames.get(frames.size() - 1);
+                        int width = bitmap.getWidth(), height = bitmap.getHeight();
+                        if (pixels.length < width * height) pixels = new int[width * height];
+                        bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
+                        ShaftTracker.Line line = ShaftTracker.find(pixels, width, height,
+                                grip.x, grip.y, bodyScale, previous == null ? null : previous.line);
+                        frame = new PoseFrame(points, sample, line);
+                        valid++;
                     }
                 }
-            } finally {
-                if (bitmap != null) bitmap.recycle();
             }
             frames.add(frame);
             samples.add(frame == null ? null : frame.sample);
             if (frames.size() % 8 == 0) progress.accept((int) (100 * time / duration));
         }
         SwingPhases.Result phases = SwingPhases.detect(samples);
-        if (phases == null) return new Result(null, new Bitmap[0], new long[0], frames.size(), valid, 0);
+        if (phases == null) return new Result(null, new Bitmap[0], new long[0], frames.size(), decoded, valid, 0);
         Bitmap[] previews = new Bitmap[SwingPhases.Phase.values().length];
         long[] times = new long[previews.length];
         int shafts = 0;
@@ -163,7 +165,7 @@ final class SwingVideoAnalyzer {
                 finally { bitmap.recycle(); }
             }
         }
-        return new Result(phases, previews, times, frames.size(), valid, shafts);
+        return new Result(phases, previews, times, frames.size(), decoded, valid, shafts);
     }
 
     private static Bitmap frameAt(MediaMetadataRetriever retriever, long time) {

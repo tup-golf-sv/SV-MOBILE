@@ -120,7 +120,8 @@ public final class SwingAnalysisActivity extends Activity {
             try {
                 SwingVideoAnalyzer.Result result = SwingVideoAnalyzer.analyze(getApplicationContext(), uri,
                         progress -> runOnUiThread(() -> {
-                            if (!destroyed) status.setText("관절 및 스윙 분석 중 " + progress + "%");
+                            if (!destroyed) status.setText(progress < 0 ? "관절 인식 모델 준비 중…"
+                                    : "관절 및 스윙 분석 중 " + progress + "%");
                         }));
                 runOnUiThread(() -> {
                     if (destroyed) return;
@@ -133,6 +134,9 @@ public final class SwingAnalysisActivity extends Activity {
                 runOnUiThread(() -> {
                     if (destroyed) return;
                     String message = error instanceof IllegalArgumentException ? error.getMessage() : null;
+                    if (error instanceof java.util.concurrent.TimeoutException) {
+                        message = "관절 분석 응답이 지연됐습니다. 같은 영상을 다시 선택해 주세요.";
+                    }
                     finish(message == null ? "영상을 분석하지 못했습니다. 기기에 저장한 MP4 또는 WebM을 선택하세요." : message);
                 });
             }

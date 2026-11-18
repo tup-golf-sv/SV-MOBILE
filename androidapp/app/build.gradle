@@ -38,7 +38,7 @@ dependencies {
 // The experimental analyzer is only present in the side-by-side debug app.
 android.buildTypes.debug {
     applicationIdSuffix '.aitest'
-    versionNameSuffix '-ai-test'
+    versionNameSuffix '-ai-test2'
 }
 dependencies {
     debugImplementation 'com.google.mlkit:pose-detection:18.0.0-beta5'
