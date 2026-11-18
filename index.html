@@ -585,9 +585,24 @@ const replay=$('replay'), replayCanvas=$('replayCanvas'), rctx=replayCanvas.getC
 let stream=null, pose=null, armed=false, processing=false, raf=null;
 let recorder=null, chunks=[], recording=false;
 let svStopTimer=null;
-const SV_PREROLL_MS=1500,SV_CAPTURE_FPS=20,SV_FRAME_STEP=1000/SV_CAPTURE_FPS;
+const SV_PREROLL_MS=1000,SV_POSTROLL_MS=1400,SV_CAPTURE_FPS=20,SV_FRAME_STEP=1000/SV_CAPTURE_FPS;
 const svRolling={front:[],side:[]};
-let svCaptureInterval=null,svCaptureActive=false,svSideLive=null;
+let svCaptureInterval=null,svCaptureTimer=null,svSideLive=null;
+let svCaptureSession=0,svNextCaptureId=0,svPublishedCaptureId=0;
+
+function svResetRollingCapture(stopSampling=false){
+  svCaptureSession++;
+  clearTimeout(svCaptureTimer);
+  svCaptureTimer=null;
+  svRolling.front=[];svRolling.side=[];
+  if(stopSampling){
+    clearInterval(svCaptureInterval);
+    svCaptureInterval=null;
+  }
+  cooldown=false;
+  swingStarted=false;addressLocked=false;ready=false;
+  lastPose=null;lastPoseTime=0;svResetAddressCandidate();
+}
 function svSampleFrame(){
   if(!armed||!stream)return;
   const now=performance.now();
@@ -603,7 +618,7 @@ function svSampleFrame(){
     c.height=Math.max(1,Math.round(v.videoHeight*scale));
     c.getContext('2d',{alpha:false}).drawImage(v,0,0,c.width,c.height);
     q.push({t:now,frame:c});
-    if(!svCaptureActive)while(q.length&&q[0].t<now-SV_PREROLL_MS)q.shift();
+    if(svCaptureTimer===null)while(q.length&&q[0].t<now-SV_PREROLL_MS)q.shift();
   }
 }
 function svStartRolling(){
@@ -617,28 +632,34 @@ async function svEncodeFrames(frames){
   const cx=canvas.getContext('2d',{alpha:false});
   if(!canvas.captureStream||typeof MediaRecorder==='undefined')return null;
   const videoStream=canvas.captureStream(SV_CAPTURE_FPS);
-  const formats=['video/webm;codecs=vp8','video/webm','video/mp4'];
-  const mime=formats.find(t=>MediaRecorder.isTypeSupported(t));
-  const rec=new MediaRecorder(videoStream,mime?{mimeType:mime}:undefined);
-  const pieces=[];
-  rec.ondataavailable=e=>{if(e.data.size)pieces.push(e.data)};
-  const stopped=new Promise(resolve=>rec.onstop=()=>resolve(new Blob(pieces,{type:rec.mimeType||'video/webm'})));
-  rec.start(100);
-  const tick=1000/SV_CAPTURE_FPS;
-  for(let i=0;i<frames.length;i++){
-    cx.drawImage(frames[i].frame,0,0,canvas.width,canvas.height);
-    await new Promise(r=>setTimeout(r,tick));
+  try{
+    const formats=['video/webm;codecs=vp8','video/webm','video/mp4'];
+    const mime=formats.find(t=>MediaRecorder.isTypeSupported(t));
+    const rec=new MediaRecorder(videoStream,mime?{mimeType:mime}:undefined);
+    const pieces=[];
+    const stopped=new Promise((resolve,reject)=>{
+      rec.ondataavailable=e=>{if(e.data.size)pieces.push(e.data);};
+      rec.onstop=()=>resolve(pieces.length?new Blob(pieces,{type:rec.mimeType||'video/webm'}):null);
+      rec.onerror=e=>reject(e.error||new Error('MediaRecorder encoding failed'));
+    });
+    const writeFrames=async()=>{
+      rec.start();
+      for(const {frame} of frames){
+        cx.drawImage(frame,0,0,canvas.width,canvas.height);
+        await new Promise(resolve=>setTimeout(resolve,SV_FRAME_STEP));
+      }
+      if(rec.state==='recording')rec.stop();
+    };
+    const [blob]=await Promise.all([stopped,writeFrames()]);
+    return blob;
+  }finally{
+    videoStream.getTracks().forEach(track=>track.stop());
   }
-  rec.stop();
-  const blob=await stopped;
-  videoStream.getTracks().forEach(t=>t.stop());
-  return blob;
 }
 function svLoadCapturedFront(blob){
   if(!blob)return;
   latestReplayBlob=blob;
   if(replay.src)URL.revokeObjectURL(replay.src);
-  replay.src=URL.createObjectURL(blob);replay.loop=true;replay.muted=true;replay.load();
   replay.onloadedmetadata=()=>{
     if(raw.videoHeight>raw.videoWidth&&replay.videoHeight>replay.videoWidth){
       window.svFrontRotation=0;
@@ -649,27 +670,42 @@ function svLoadCapturedFront(blob){
     $('timeTotal').textContent=replay.duration.toFixed(2);
     replay.currentTime=0;replay.play().catch(()=>{});
     if(typeof window.svShowReplay==='function')window.svShowReplay();
-    $('result').textContent='스윙 전 1.5초 + 감지 후 3.2초';
+    $('result').textContent='최근 스윙 · 다음 스윙까지 반복 재생';
   };
+  replay.src=URL.createObjectURL(blob);replay.loop=true;replay.muted=true;replay.load();
 }
-function svStartPreRollCapture(){
-  if(svCaptureActive)return;
-  svCaptureActive=true;
-  const detectedAt=performance.now();
-  for(const key of ['front','side']){
-    const q=svRolling[key];
-    while(q.length&&q[0].t<detectedAt-SV_PREROLL_MS)q.shift();
-  }
-  setTimeout(async()=>{
-    const front=svRolling.front.slice(),side=svRolling.side.slice();
-    svRolling.front=[];svRolling.side=[];
-    svCaptureActive=false;
-    try{
-      const [frontBlob,sideBlob]=await Promise.all([svEncodeFrames(front),svEncodeFrames(side)]);
-      svLoadCapturedFront(frontBlob);
-      if(sideBlob&&typeof window.svLoadCapturedSide==='function')window.svLoadCapturedSide(sideBlob);
-    }catch(e){console.error('R6 capture',e);$('status').textContent='R6 녹화 인코딩 실패: '+(e.message||e);}
-  },SWING_CAPTURE_MS);
+function svStartPreRollCapture(detectedAt){
+  if(svCaptureTimer!==null)return;
+  const session=svCaptureSession,captureId=++svNextCaptureId;
+  const firstFrameAt=detectedAt-SV_PREROLL_MS;
+  const lastFrameAt=detectedAt+SV_POSTROLL_MS;
+  cooldown=true;
+  svCaptureTimer=setTimeout(async()=>{
+    svCaptureTimer=null;
+    const takeFrames=key=>{
+      const q=svRolling[key];
+      const clip=q.filter(({t})=>t>=firstFrameAt&&t<=lastFrameAt);
+      svRolling[key]=q.filter(({t})=>t>=performance.now()-SV_PREROLL_MS);
+      return clip;
+    };
+    const front=takeFrames('front'),side=takeFrames('side');
+
+    swingStarted=false;addressLocked=false;ready=false;
+    lastPose=null;lastPoseTime=0;cooldown=false;
+    $('addressState').textContent='OFF';$('swingState').textContent='대기';
+    $('state').className='state wait';$('state').textContent='다음 스윙 대기';
+    $('status').textContent='다음 어드레스를 잡으세요.';
+
+    const [frontResult,sideResult]=await Promise.allSettled([svEncodeFrames(front),svEncodeFrames(side)]);
+    if(session!==svCaptureSession||captureId<=svPublishedCaptureId)return;
+    if(frontResult.status!=='fulfilled'||!frontResult.value){
+      if(captureId===svNextCaptureId)$('result').textContent='스윙 영상 저장 실패 · 다음 스윙을 촬영하세요.';
+      return;
+    }
+    svPublishedCaptureId=captureId;
+    svLoadCapturedFront(frontResult.value);
+    window.svLoadCapturedSide?.(sideResult.status==='fulfilled'?sideResult.value:null);
+  },SV_POSTROLL_MS);
 }
 let latestReplayBlob=null;
 let ready=false, readyAt=0, stableSince=0, swingStarted=false, swingStartAt=0, addressLocked=false;
@@ -1291,7 +1327,7 @@ async function onResults(results){
         svReadyTrace.readyCount++;svReadyTrace.lastReason='READY 성공';
         addressLocked=true;
         ready=true;readyAt=now;stableSince=0;svResetAddressCandidate();
-        // READY is unlimited; rolling buffer retains only the latest 1.5 seconds.
+        // Keep only the configured pre-roll while awaiting a swing.
         $('addressState').textContent='LOCK';
         $('overlay').style.display='flex';
         $('state').className='state ready';$('state').textContent='READY';
@@ -1345,15 +1381,7 @@ async function onResults(results){
       $('state').className='state impact';$('state').textContent='SWING 감지';
       $('status').textContent='골프 스윙 패턴 확인 · 영상 저장 중';
 
-      svStartPreRollCapture();
-      cooldown=true;
-
-      setTimeout(()=>{
-        swingStarted=false;addressLocked=false;ready=false;lastPose=null;lastPoseTime=0;cooldown=false;
-        $('addressState').textContent='OFF';$('swingState').textContent='대기';
-        $('state').className='state wait';$('state').textContent='다음 스윙 대기';
-        $('status').textContent='최근 스윙 반복재생 유지 · 다음 어드레스를 기다립니다.';
-      },SWING_CAPTURE_MS+1000);
+      svStartPreRollCapture(now);
     }
   }
 }
@@ -1516,7 +1544,7 @@ $('connect').onclick=async()=>{
 };
 
 $('arm').onclick=()=>{
-  armed=!armed;if(!armed){svRolling.front=[];svRolling.side=[];}ready=false;addressLocked=false;stableSince=0;svResetAddressCandidate();swingStarted=false;lastPose=null;lastPoseTime=0;
+  armed=!armed;if(!armed)svResetRollingCapture();ready=false;addressLocked=false;stableSince=0;svResetAddressCandidate();swingStarted=false;lastPose=null;lastPoseTime=0;
   $('arm').textContent=armed?'스윙감지 OFF':'스윙감지 ON';
   $('state').className='state wait';
   $('addressState').textContent='OFF';$('state').textContent=armed?'사람/어드레스 대기':'대기';
@@ -1600,6 +1628,7 @@ replay.addEventListener('timeupdate',()=>{
 
 $('disconnect').onclick=()=>{
   armed=false;
+  svResetRollingCapture(true);
   if(raf) cancelAnimationFrame(raf);
   if(stream) stream.getTracks().forEach(t=>t.stop());
   if(recorder&&recorder.state==='recording') recorder.stop();
@@ -1747,6 +1776,7 @@ $('disconnect').onclick=()=>{
   });
 
   byId('exitBtn')?.addEventListener('click',()=>{
+    svResetRollingCapture(true);
     try{
       if(recorder && recorder.state==='recording') recorder.stop();
     }catch(e){}
@@ -1959,15 +1989,29 @@ $('disconnect').onclick=()=>{
   window.svLoadCapturedSide=function(blob){
     latestSideBlob=blob;
     if(sideReplay.src)URL.revokeObjectURL(sideReplay.src);
-    sideReplay.src=URL.createObjectURL(blob);sideReplay.loop=true;sideReplay.muted=true;sideReplay.load();
+    if(!blob){
+      sideReplay.onloadedmetadata=null;
+      sideReplay.pause();
+      sideReplay.removeAttribute('src');
+      sideReplay.load();
+      sideCtx.clearRect(0,0,sideCanvas.width,sideCanvas.height);
+      resetReplayTrails('side');clearJoint('side');
+      ['sidePlay','sidePause','sideSendA','sideSendB','sideJointBtn','sideFrameBack','sideFrameNext','sideSpeed','sideRotateBtn','sideSeek']
+        .forEach(id=>byId(id).disabled=true);
+      byId('sideTimeNow').textContent=byId('sideTimeTotal').textContent='0.00';
+      byId('sideSeek').value=0;
+      byId('sideResult').textContent=sideStream?'이번 스윙의 측면 영상 없음':'측면 카메라 연결 대기';
+      return;
+    }
     sideReplay.onloadedmetadata=()=>{
       ['sidePlay','sidePause','sideSendA','sideSendB','sideJointBtn','sideFrameBack','sideFrameNext','sideSpeed','sideRotateBtn','sideSeek'].forEach(id=>{const el=byId(id);if(el)el.disabled=false});
       byId('sideTimeTotal').textContent=(sideReplay.duration||0).toFixed(2);
       sideReplay.currentTime=0;
       sideReplay.playbackRate=window.svGetAutoReplaySpeed?window.svGetAutoReplaySpeed():0.5;
       sideReplay.play().catch(()=>{});
-      byId('sideResult').textContent='측면 스윙 전 1.5초 + 감지 후 3.2초';
+      byId('sideResult').textContent='최근 스윙 · 측면';
     };
+    sideReplay.src=URL.createObjectURL(blob);sideReplay.loop=true;sideReplay.muted=true;sideReplay.load();
   };
   /* ---------- 정면 트리거와 동시에 측면 녹화 ---------- */
   window.stopSideRecording=function(){
@@ -2335,6 +2379,7 @@ $('disconnect').onclick=()=>{
     if(sideRecorder&&sideRecorder.state==='recording') sideRecorder.stop();
     if(sideStream) sideStream.getTracks().forEach(t=>t.stop());
     sideStream=null;
+    if(svSideLive) svSideLive.srcObject=null;
     document.querySelector('.wrap')?.classList.remove('dual-camera-active');
     byId('sideResult').textContent='CAM2 해제 · 정면 리플레이 전체화면';
   },true);
