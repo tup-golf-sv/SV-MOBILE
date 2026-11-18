@@ -34,3 +34,12 @@ dependencies {
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
     androidTestImplementation 'androidx.test:core:1.6.1'
 }
+
+// The experimental analyzer is only present in the side-by-side debug app.
+android.buildTypes.debug {
+    applicationIdSuffix '.aitest'
+    versionNameSuffix '-ai-test'
+}
+dependencies {
+    debugImplementation 'com.google.mlkit:pose-detection:18.0.0-beta5'
+}
