@@ -37,9 +37,30 @@ dependencies {
 
 // The experimental analyzer is only present in the side-by-side debug app.
 android.buildTypes.debug {
-    applicationIdSuffix '.aitest'
-    versionNameSuffix '-ai-test2'
+    applicationIdSuffix '.tracktest'
+    versionNameSuffix '-tracking-vzone-test1'
 }
 dependencies {
     debugImplementation 'com.google.mlkit:pose-detection:18.0.0-beta5'
+}
+
+// This asset override exists only in the debug APK. The existing site stays byte-identical.
+def trackingAssets = layout.buildDirectory.dir('generated/trackingAssets')
+android.sourceSets.debug.assets.srcDir(trackingAssets)
+tasks.register('prepareTrackingPage') {
+    def originalPage = rootProject.file('../index.html')
+    inputs.file(originalPage)
+    outputs.dir(trackingAssets)
+    doLast {
+        def page = originalPage.getText('UTF-8')
+        def end = page.lastIndexOf('</body>')
+        if (end < 0) throw new GradleException('Missing SV MOBILE body end')
+        def directory = trackingAssets.get().asFile
+        directory.mkdirs()
+        new File(directory, 'index.html').setText(
+                page.substring(0, end) + '<script src="live-golfer-tracking.js"></script>\n' + page.substring(end), 'UTF-8')
+    }
+}
+tasks.configureEach {
+    if (name == 'mergeDebugAssets') dependsOn 'prepareTrackingPage'
 }
