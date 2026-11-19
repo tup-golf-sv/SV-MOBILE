@@ -1,6 +1,8 @@
 name: Android APK build
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/sv-mobile-performance-test]
   pull_request:
     branches: [main]
 permissions:
@@ -39,6 +41,8 @@ jobs:
           java -cp /tmp/sv-product-test kr.co.tupgolf.svmobile.ProductConfigurationTest
           javac -d /tmp/sv-product-test androidapp/app/src/main/java/kr/co/tupgolf/svmobile/SubscriptionPlanPolicy.java androidapp/app/src/main/java/kr/co/tupgolf/svmobile/LifecycleTasks.java scripts/tests/BillingPolicyRegression.java
           java -cp /tmp/sv-product-test kr.co.tupgolf.svmobile.BillingPolicyRegression
+      - name: Verify isolated golfer tracking and V-zone regressions
+        run: node --test scripts/tests/live-golfer-tracking.cjs
       - name: Compile APK, AAB and instrumentation tests
         working-directory: androidapp
         env:
