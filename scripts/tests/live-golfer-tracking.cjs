@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const {observe, createTracker, createZoneLock, findVZone, createMotionGate} =
+const {observe, appearanceFromPixels, createTracker, createZoneLock, findVZone, createMotionGate} =
   require('../../androidapp/app/src/debug/assets/live-golfer-tracking.js');
 
 function golferLandmarks(x=.50, view='side', occluded=false, scale=1) {
@@ -30,6 +30,11 @@ function golferLandmarks(x=.50, view='side', occluded=false, scale=1) {
 function golfer(...args) {
   return observe(golferLandmarks(...args),1);
 }
+function shirt(red, green, blue) {
+  const pixels = new Uint8Array(14 * 14 * 4);
+  for (let i = 0; i < pixels.length; i += 4) pixels.set([red, green, blue, 255], i);
+  return appearanceFromPixels(pixels);
+}
 function through(tracker, a, b, input) {
   let state;
   for (let now=a; now<=b; now+=50) state=tracker.update(input(now),now);
@@ -54,6 +59,30 @@ test('loses the old silhouette and reacquires a returning golfer without swappin
   assert.equal(other.box,null);
   const reentered=through(t,1050,1400,()=>golfer(.53));
   assert.equal(reentered.accepted,true);
+});
+test('rejects a similarly placed passer after loss, then reacquires the golfer in 300 ms', () => {
+  const blue = shirt(36, 94, 200), dimBlue = shirt(18, 47, 100), red = shirt(211, 38, 48);
+  assert.ok(blue && dimBlue && red);
+  const t = createTracker(), pose = golfer(), passer = {...golfer(.52), stance:false};
+  for (let now=0; now<=400; now+=50) t.update(pose,now,blue);
+  const held = t.update(passer,450,red);
+  assert.equal(held.phase,'held');
+  assert.equal(held.accepted,false);
+  for (let now=500; now<=2400; now+=50) assert.equal(t.update(passer,now,red).accepted,false);
+  assert.equal(t.update(passer,2450,red).box,null);
+  for (let now=2500; now<2800; now+=50) assert.equal(t.update(pose,now,dimBlue).accepted,false);
+  assert.equal(t.update(pose,2800,dimBlue).accepted,true);
+});
+
+test('accepts a new golfer after a different shirt settles at address', () => {
+  const green=shirt(40,174,70), red=shirt(208,48,45);
+  assert.equal(shirt(110,108,104),null);
+  const t=createTracker(), pose=golfer();
+  for (let now=0; now<=350; now+=50) t.update(pose,now,green);
+  assert.equal(t.update(null,2200).box,null);
+  for (let now=2250; now<2650; now+=50) assert.equal(t.update(pose,now,red).accepted,false);
+  assert.equal(t.update(pose,2650,red).accepted,true);
+  assert.equal(t.update(pose,2700,green).accepted,false);
 });
 test('holds a side angle during turn and tolerates a hidden wrist', () => {
   const t=createTracker();
@@ -104,6 +133,10 @@ test('fits a shaft to the bright ball on the shaft side of the golfer', () => {
   const found=findVZone(pixels,w,h,pose);
   assert.ok(found);
   assert.ok(Math.hypot(found.ball.x*w-222,found.ball.y*h-274)<5);
+  const dimmed=pixels.map((value,index)=>index%4===3?value:Math.round(value*.55));
+  const dimZone=findVZone(dimmed,w,h,pose);
+  assert.ok(dimZone);
+  assert.ok(Math.hypot(dimZone.ball.x*w-222,dimZone.ball.y*h-274)<5);
 });
 
 test('blocks a brief hand jitter and requires departure from a settled address', () => {

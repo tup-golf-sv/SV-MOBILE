@@ -54,10 +54,49 @@
     return {aspect, box, hip, torso, shoulder, feet, wrists, grip, angle, stance, shoulderWidth, hipWidth, feetWidth};
   }
 
+  function torsoRegion(pose, width, height) {
+    const torso = pose.torso * height;
+    const w = (.35 + .23 * Math.min(1, pose.shoulderWidth)) * torso;
+    const h = .32 * torso;
+    const x = mix(pose.shoulder.x, pose.hip.x, .46) * width / pose.aspect - w / 2;
+    const y = mix(pose.shoulder.y, pose.hip.y, .46) * height - h / 2;
+    return x >= 0 && y >= 0 && x + w <= width && y + h <= height && w >= 5 && h >= 5
+      ? {x, y, w, h} : null;
+  }
+
+  function appearanceFromPixels(rgba) {
+    const bins = Array(12).fill(0);
+    let count = 0;
+    for (let i = 0; i < rgba.length; i += 4) {
+      const r = rgba[i], g = rgba[i + 1], b = rgba[i + 2];
+      const max = Math.max(r, g, b), chroma = max - Math.min(r, g, b);
+      if (max < 45 || chroma < Math.max(16, .24 * max)) continue;
+      const hue = max === r ? (g - b) / chroma : max === g ? 2 + (b - r) / chroma : 4 + (r - g) / chroma;
+      const position = (2 * hue + 12) % 12, index = Math.floor(position);
+      bins[index] += 1 - (position - index);
+      bins[(index + 1) % 12] += position - index;
+      count++;
+    }
+    if (count < .56 * rgba.length / 4 || !count) return null;
+    const peak = bins.indexOf(Math.max(...bins));
+    const neighborWeight = bins[peak] + bins[(peak + 1) % 12] + bins[(peak + 11) % 12];
+    return neighborWeight >= .73 * count ? bins.map(value => value / count) : null;
+  }
+
+  function compatibleAppearance(a, b) {
+    if (!a || !b) return true;
+    const difference = a.reduce((sum, value, i) => sum + Math.abs(value - b[i]), 0);
+    if (difference <= 1.20) return true;
+    // Adjacent hue bins can trade weight under a change in white balance.
+    const overlap = a.reduce((sum, value, i) =>
+      sum + Math.min(value, b[i] + b[(i + 1) % 12] + b[(i + 11) % 12]), 0);
+    return overlap >= .55;
+  }
+
   function createTracker() {
-    let target, candidate, silhouette, heldAngle, address, trackedAt = 0, stanceReady = false;
+    let target, targetAppearance, candidate, silhouette, heldAngle, address, trackedAt = 0, stanceReady = false;
     function reset() {
-      target = candidate = silhouette = heldAngle = address = null;
+      target = targetAppearance = candidate = silhouette = heldAngle = address = null;
       trackedAt = 0;
       stanceReady = false;
     }
@@ -74,23 +113,37 @@
       return pose.angle === 'side' && pose.stance && pose.torso >= .135
         && hipX >= .16 && hipX <= .84 && gripX >= .30 && gripX <= .70;
     }
-    function update(pose, now) {
+    function update(pose, now, appearance) {
       const age = target ? now - trackedAt : Infinity;
-      if (age > REACQUIRE_MS && target) reset();
-      const same = target && pose && close(target, pose, .42 + Math.min(age, HOLD_MS) / 700);
+      if (age > REACQUIRE_MS && target) {
+        const previousAppearance = targetAppearance;
+        reset();
+        targetAppearance = previousAppearance;
+      }
+      const same = target && pose && close(target, pose, .42 + Math.min(age, HOLD_MS) / 700)
+        && compatibleAppearance(targetAppearance, appearance);
+      const differentGolfer = pose && !target &&
+        !compatibleAppearance(targetAppearance, appearance || candidate?.appearance);
+      const eligible = pose && (target ? same : insideTee(pose) &&
+        (!differentGolfer || (pose.stance && pose.angle)));
       let observed = false;
       if (same && age <= HOLD_MS) {
         target = pose;
         trackedAt = now;
         observed = true;
-      } else if (pose && (!target ? insideTee(pose) : same)) {
-        if (!candidate || now - candidate.last > HOLD_MS || !close(candidate.origin, pose, .56)) {
-          candidate = {origin:pose, since:now, last:now, count:0};
+      } else if (eligible) {
+        if (!candidate || now - candidate.last > HOLD_MS || !close(candidate.origin, pose, .56)
+            || !compatibleAppearance(candidate.appearance, appearance)
+            || (differentGolfer && (pose.angle !== candidate.origin.angle || !candidate.origin.stance ||
+                distance(candidate.origin.grip, pose.grip) > pose.torso * .25))) {
+          candidate = {origin:pose, appearance, since:now, last:now, count:0};
         }
+        candidate.appearance ||= appearance;
         candidate.last = now;
         candidate.count++;
-        if (now - candidate.since >= ACQUIRE_MS && candidate.count >= 3) {
+        if (now - candidate.since >= (differentGolfer ? ADDRESS_MS : ACQUIRE_MS) && candidate.count >= 3) {
           target = pose;
+          targetAppearance = candidate.appearance || targetAppearance;
           silhouette = null;
           trackedAt = now;
           observed = true;
@@ -192,26 +245,28 @@
         const i = (y * width + x) * 4;
         const red = pixels[i], green = pixels[i+1], blue = pixels[i+2];
         const spread = Math.max(red,green,blue) - Math.min(red,green,blue);
-        const white = Math.min(red,green,blue) >= 156 && spread <= 55;
-        const yellow = red >= 158 && green >= 148 && red - blue >= 42 && green - blue >= 42
-          && red >= green * .86;
         const luma = at(x, y);
-        if (luma < 150 || (!white && !yellow)) continue;
+        if (luma < 88) continue;
+        const exposure = clamp(luma / 165, .50, 1);
+        const white = Math.min(red,green,blue) >= 156 * exposure && spread <= 55 * exposure;
+        const yellow = red >= 158 * exposure && green >= 148 * exposure
+          && red - blue >= 42 * exposure && green - blue >= 42 * exposure && red >= green * .86;
+        if (!white && !yellow) continue;
         const near = [at(x - 1, y), at(x + 1, y), at(x, y - 1), at(x, y + 1)];
         const inner = Math.max(2, Math.floor(radius*.6));
         const diagonal = Math.max(1,Math.round(inner*.707));
         const innerRing = [at(x-inner,y),at(x+inner,y),at(x,y-inner),at(x,y+inner),
           at(x-diagonal,y-diagonal),at(x+diagonal,y-diagonal),
           at(x-diagonal,y+diagonal),at(x+diagonal,y+diagonal)];
-        if (innerRing.filter(v => v >= luma - 55).length < (yellow ? 4 : 6)) continue;
+        if (innerRing.filter(v => v >= luma - 55 * exposure).length < (yellow ? 4 : 6)) continue;
         const ring = Math.ceil(radius * 1.36);
         const far = [at(x - ring, y), at(x + ring, y), at(x, y - ring), at(x, y + ring),
           at(x - radius, y - radius), at(x + radius, y - radius),
           at(x - radius, y + radius), at(x + radius, y + radius)];
         const brightCore = (luma * 2 + near.reduce((a, b) => a + b, 0)) / 6;
-        if (far.filter(v => brightCore - v >= 20).length < 6) continue;
+        if (far.filter(v => brightCore - v >= 20 * exposure).length < 6) continue;
         const score = brightCore - far.reduce((a, b) => a + b, 0) / far.length;
-        ballCandidates.push({x, y, score:score + .25*luma});
+        ballCandidates.push({x, y, exposure, score:score + .25*luma});
       }
     }
     ballCandidates.sort((a, b) => b.score - a.score);
@@ -220,7 +275,7 @@
       if (distinct.every(other => distance(ball,other) > radius+1)) distinct.push(ball);
       if (distinct.length >= 20) break;
     }
-    function shaftSupport(top, end) {
+    function shaftSupport(top, end, exposure) {
       const dx = end.x - top.x, dy = end.y - top.y, len = Math.hypot(dx,dy);
       if (len < .70 * torso || dy <= .55 * len) return 0;
       const nx = dy / len, ny = -dx / len;
@@ -235,7 +290,7 @@
         const center = at(x,y), a = at(x+nx*.85,y+ny*.85), b = at(x-nx*.85,y-ny*.85);
         const hi = Math.max(center,a,b) - Math.max(left,right);
         const lo = Math.min(left,right) - Math.min(center,a,b);
-        const polarity = Math.max(hi,lo) < 11 ? 0 : hi >= lo ? 1 : -1;
+        const polarity = Math.max(hi,lo) < Math.max(7, 11 * exposure) ? 0 : hi >= lo ? 1 : -1;
         if (!polarity) { chain=0; previous=0; continue; }
         chain = polarity === previous ? chain + 1 : 1;
         strongest = Math.max(strongest,chain);
@@ -255,7 +310,7 @@
           const top = {x:grip.x+shiftX*torso,y:grip.y+shiftY*torso};
           for (const headX of [-.065,0,.065]) {
             const end = {x:ball.x+headX*torso,y:ball.y+Math.abs(headX)*.65*torso};
-            const support = shaftSupport(top,end);
+            const support = shaftSupport(top,end,ball.exposure);
             if (!support) continue;
             const penalty = 140*(Math.abs(shiftX)+.4*shiftY+1.5*Math.abs(headX));
             const score = support-penalty;
@@ -317,6 +372,10 @@
     const overlay = layer.getContext('2d');
     const pixels = document.createElement('canvas');
     const pixelContext = pixels.getContext('2d', {willReadFrequently:true});
+    const shirt = document.createElement('canvas');
+    shirt.width = 14;
+    shirt.height = 14;
+    const shirtContext = shirt.getContext('2d', {willReadFrequently:true});
     const tracking = createTracker();
     const motion = createMotionGate();
     const vzone = createZoneLock();
@@ -399,7 +458,17 @@
       const imageW = normalizesPortrait ? raw.videoWidth : poseInput.width;
       const imageH = normalizesPortrait ? raw.videoHeight : poseInput.height;
       const poseFrame = observe(aligned,imageW/imageH);
-      latest = tracking.update(poseFrame,now);
+      let appearance = null;
+      const region = poseFrame && torsoRegion(poseFrame,imageW,imageH);
+      if (region && shirtContext) {
+        try {
+          shirtContext.drawImage(image,region.x,region.y,region.w,region.h,0,0,shirt.width,shirt.height);
+          appearance = appearanceFromPixels(shirtContext.getImageData(0,0,shirt.width,shirt.height).data);
+        } catch {
+          // Geometry is still available if the video frame cannot be read.
+        }
+      }
+      latest = tracking.update(poseFrame,now,appearance);
       confirmedMotion = motion.update(latest.accepted && armed && !cooldown ? poseFrame : null,ready,now);
       if (latest.address && latest.angle === 'side' && !cooldown && !swingStarted && imageW && imageH) {
         if (now - sampleAt >= 140) {
@@ -439,7 +508,7 @@
   }
 
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {observe,createTracker,findVZone,createZoneLock,createMotionGate};
+    module.exports = {observe,torsoRegion,appearanceFromPixels,createTracker,findVZone,createZoneLock,createMotionGate};
   } else {
     install();
   }

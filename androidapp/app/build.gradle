@@ -38,7 +38,10 @@ dependencies {
 // The experimental analyzer is only present in the side-by-side debug app.
 android.buildTypes.debug {
     applicationIdSuffix '.tracktest'
-    versionNameSuffix '-tracking-vzone-test1'
+    versionNameSuffix '-tracking-vzone-test2'
+}
+androidComponents.onVariants(androidComponents.selector().withBuildType('debug')) { variant ->
+    variant.outputs.each { it.versionCode.set(5) }
 }
 dependencies {
     debugImplementation 'com.google.mlkit:pose-detection:18.0.0-beta5'
@@ -53,6 +56,7 @@ tasks.register('prepareTrackingPage') {
     outputs.dir(trackingAssets)
     doLast {
         def page = originalPage.getText('UTF-8')
+                .replace('https://cdn.jsdelivr.net/npm/@mediapipe/pose/', './mediapipe-pose/')
         def end = page.lastIndexOf('</body>')
         if (end < 0) throw new GradleException('Missing SV MOBILE body end')
         def directory = trackingAssets.get().asFile
@@ -61,6 +65,56 @@ tasks.register('prepareTrackingPage') {
                 page.substring(0, end) + '<script src="live-golfer-tracking.js"></script>\n' + page.substring(end), 'UTF-8')
     }
 }
+
+def trackingPoseAssets = layout.buildDirectory.dir('generated/trackingPoseAssets')
+def trackingPoseVersion = '0.5.1675469404'
+def trackingPoseSha256 = '8bb349a7b3a3ba699df23be804ddd3b3eab810b50b15406894be257859388a84'
+def suppliedPoseArchive = providers.gradleProperty('trackingPoseArchive').map { file(it) }
+android.sourceSets.debug.assets.srcDir(trackingPoseAssets)
+tasks.register('prepareTrackingPose') {
+    inputs.property('archiveSha256', trackingPoseSha256)
+    inputs.files(suppliedPoseArchive)
+    outputs.dir(trackingPoseAssets)
+    doLast {
+        def archive = suppliedPoseArchive.orNull
+        if (archive == null) {
+            if (gradle.startParameter.offline) {
+                throw new GradleException('Set -PtrackingPoseArchive to the pinned MediaPipe Pose npm archive for an offline build')
+            }
+            archive = new File(temporaryDir, "pose-${trackingPoseVersion}.tgz")
+            def connection = URI.create(
+                    "https://registry.npmjs.org/@mediapipe/pose/-/pose-${trackingPoseVersion}.tgz"
+            ).toURL().openConnection()
+            connection.connectTimeout = 15000
+            connection.readTimeout = 30000
+            connection.inputStream.withCloseable { input ->
+                archive.withOutputStream { output -> input.transferTo(output) }
+            }
+        }
+        def digest = java.security.MessageDigest.getInstance('SHA-256')
+        archive.withInputStream { input ->
+            byte[] buffer = new byte[32768]
+            int count
+            while ((count = input.read(buffer)) != -1) digest.update(buffer, 0, count)
+        }
+        if (digest.digest().encodeHex().toString() != trackingPoseSha256) {
+            throw new GradleException('Unexpected MediaPipe Pose npm archive checksum')
+        }
+        def assets = [
+                'pose.js', 'pose_web.binarypb', 'pose_landmark_full.tflite', 'pose_landmark_lite.tflite',
+                'pose_solution_packed_assets.data', 'pose_solution_packed_assets_loader.js',
+                'pose_solution_simd_wasm_bin.data', 'pose_solution_simd_wasm_bin.js',
+                'pose_solution_simd_wasm_bin.wasm', 'pose_solution_wasm_bin.js', 'pose_solution_wasm_bin.wasm'
+        ]
+        project.sync {
+            from tarTree(resources.gzip(archive))
+            include assets.collect { "package/${it}" }
+            eachFile { it.relativePath = new RelativePath(true, 'mediapipe-pose', it.name) }
+            includeEmptyDirs = false
+            into trackingPoseAssets
+        }
+    }
+}
 tasks.configureEach {
-    if (name == 'mergeDebugAssets') dependsOn 'prepareTrackingPage'
+    if (name == 'mergeDebugAssets') dependsOn 'prepareTrackingPage', 'prepareTrackingPose'
 }
