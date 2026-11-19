@@ -138,7 +138,7 @@
                 distance(candidate.origin.grip, pose.grip) > pose.torso * .25))) {
           candidate = {origin:pose, appearance, since:now, last:now, count:0};
         }
-        candidate.appearance ||= appearance;
+        if (!candidate.appearance) candidate.appearance = appearance;
         candidate.last = now;
         candidate.count++;
         if (now - candidate.since >= (differentGolfer ? ADDRESS_MS : ACQUIRE_MS) && candidate.count >= 3) {
