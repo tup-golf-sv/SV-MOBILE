@@ -584,13 +584,14 @@ const raw=$('raw'), view=$('view'), ctx=view.getContext('2d');
 const poseInput=document.createElement('canvas'), poseInputCtx=poseInput.getContext('2d');
 const replay=$('replay'), replayCanvas=$('replayCanvas'), rctx=replayCanvas.getContext('2d');
 
-function svInitialPoseRotation(){
+function svIsMobileCamera(){
   const ua=navigator.userAgent||'';
   const tabletOrPhone=/Android|iPhone|iPad|iPod/i.test(ua) ||
     (navigator.maxTouchPoints>1 && window.matchMedia('(pointer: coarse)').matches);
   const television=/SmartTV|Android TV|GoogleTV|Tizen|WebOS|AFT\w*/i.test(ua);
-  return tabletOrPhone && !television ? 0 : 90;
+  return tabletOrPhone && !television;
 }
+function svInitialPoseRotation(){return svIsMobileCamera()?0:90;}
 const svDefaultPoseRotation=svInitialPoseRotation();
 let svPoseRotation=svDefaultPoseRotation;
 
@@ -1428,27 +1429,27 @@ async function poseLoop(){
   raf=requestAnimationFrame(poseLoop);
 }
 
+function svFitVideo(width,height,boxWidth,boxHeight,rotation){
+  const quarter=rotation%180!==0;
+  const scale=Math.min((quarter?boxHeight:boxWidth)/width,(quarter?boxWidth:boxHeight)/height);
+  return {width:width*scale,height:height*scale};
+}
+
 function replayLoop(){
   if(replay.videoWidth){
-    const r=replayCanvas.getBoundingClientRect();
-    const cw=Math.max(1,Math.round(r.width)),ch=Math.max(1,Math.round(r.height));
+    const cw=Math.max(1,replayCanvas.clientWidth),ch=Math.max(1,replayCanvas.clientHeight);
     if(replayCanvas.width!==cw||replayCanvas.height!==ch){
       replayCanvas.width=cw;replayCanvas.height=ch;
     }
     rctx.clearRect(0,0,cw,ch);
 
     const deg=(window.svFrontRotation??90)%360;
-    const rotated=(deg===90||deg===270);
-    const sw=replay.videoWidth, sh=replay.videoHeight;
-    const outW=rotated?sh:sw, outH=rotated?sw:sh;
-
-    // 원본 종횡비 유지 + 영상 전체 표시 + 크롭/늘어남 금지
-    const scale=Math.min(cw/outW,ch/outH);
+    const frame=svFitVideo(replay.videoWidth,replay.videoHeight,cw,ch,deg);
 
     rctx.save();
     rctx.translate(cw/2,ch/2);
     rctx.rotate(deg*Math.PI/180);
-    rctx.drawImage(replay,-sw*scale/2,-sh*scale/2,sw*scale,sh*scale);
+    rctx.drawImage(replay,-frame.width/2,-frame.height/2,frame.width,frame.height);
     rctx.restore();
   }
   requestAnimationFrame(replayLoop);
@@ -1461,9 +1462,10 @@ function sizeRawPreview(){
   const stage=$('liveStage');
   if(!stage || !raw || !raw.videoWidth || !raw.videoHeight) return;
   const w=Math.max(1,stage.clientWidth), h=Math.max(1,stage.clientHeight);
-  const quarter=(window.svPreviewRotationDeg??svDefaultPoseRotation)%180!==0;
-  raw.style.setProperty('width',(quarter?h:w)+'px','important');
-  raw.style.setProperty('height',(quarter?w:h)+'px','important');
+  const rotation=window.svPreviewRotationDeg??svDefaultPoseRotation;
+  const frame=svFitVideo(raw.videoWidth,raw.videoHeight,w,h,rotation);
+  raw.style.setProperty('width',frame.width+'px','important');
+  raw.style.setProperty('height',frame.height+'px','important');
 }
 window.addEventListener('resize',()=>setTimeout(sizeRawPreview,30));
 
@@ -1485,6 +1487,15 @@ async function refreshCameraList(){
 if(navigator.mediaDevices?.addEventListener) navigator.mediaDevices.addEventListener('devicechange',refreshCameraList);
 refreshCameraList();
 
+function svCameraFormat(){
+  const format={width:{ideal:1280},frameRate:{ideal:30}};
+  if(!svIsMobileCamera())return {...format,height:{ideal:720}};
+  // A taller mobile capture format gives the golfer more vertical room.
+  const supported=navigator.mediaDevices.getSupportedConstraints?.();
+  return {...format,aspectRatio:{ideal:4/3},
+    ...(supported?.resizeMode?{resizeMode:{ideal:'none'}}:{})};
+}
+
 $('connect').onclick=async()=>{
   try{
     const selectedCamera=$('cameraSelect')?.value||'';
@@ -1492,9 +1503,10 @@ $('connect').onclick=async()=>{
       $('status').textContent='카메라 연결 불가: 현재 파일 주소(content:// 또는 file://)에서는 브라우저가 카메라를 차단할 수 있습니다. SV MOBILE을 HTTPS 웹주소로 열어주세요.';
       return;
     }
+    const format=svCameraFormat();
     const videoConstraints=selectedCamera
-      ? {deviceId:{exact:selectedCamera},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}}
-      : {facingMode:{exact:'user'},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}};
+      ? {...format,deviceId:{exact:selectedCamera}}
+      : {...format,facingMode:{exact:'user'}};
     $('status').textContent='카메라 권한을 요청하는 중입니다. 브라우저 권한 창에서 허용을 눌러주세요.';
     // Never silently switch a requested front camera to the rear camera.
     try {
@@ -1503,8 +1515,8 @@ $('connect').onclick=async()=>{
       if (cameraError?.name !== 'OverconstrainedError') throw cameraError;
       // PC webcam compatibility: relax constraints only after the original request fails.
       const relaxedVideo = selectedCamera
-        ? {deviceId:{ideal:selectedCamera},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}}
-        : {facingMode:{ideal:'user'},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}};
+        ? {...format,deviceId:{ideal:selectedCamera}}
+        : {...format,facingMode:{ideal:'user'}};
       try {
         stream=await navigator.mediaDevices.getUserMedia({video:relaxedVideo,audio:false});
       } catch (retryError) {
@@ -1931,6 +1943,13 @@ $('disconnect').onclick=()=>{
 
     // 실제 정면 장치와 다른 장치를 CAM2로 선택.
     let id=sel.value;
+    // Android and iOS also enumerate their built-in lenses as separate inputs.
+    // Only an explicitly selected second camera should split mobile replay.
+    if(svIsMobileCamera() && (!id || id===actualFrontId)){
+      wrap.classList.remove('dual-camera-active');
+      byId('sideResult').textContent='모바일 · 리플레이 1화면';
+      return false;
+    }
     if(!id || id===actualFrontId){
       const candidate=devices.find(d=>d.deviceId && d.deviceId!==actualFrontId);
       id=candidate?.deviceId||'';
