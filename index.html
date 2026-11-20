@@ -576,6 +576,8 @@ body>#svFloatingReplay #svAutoReplaySpeed{height:34px!important;min-height:0!imp
 </div>
 </div>
 
+<script src="./sv-r15-mobile-temporal.js"></script>
+<script src="./sv-r15-mobile-core.js"></script>
 <script>
 const $=id=>document.getElementById(id);
 const raw=$('raw'), view=$('view'), ctx=view.getContext('2d');
@@ -797,6 +799,8 @@ function poseMotionMetrics(lm, now){
 }
 
 function addressSimilarity(lm){
+  // Verified PC R15 side-only address, never replace original FRONT conditions.
+  if(window.svMobileR15?.sideActive()) return window.svMobileR15.sideAddress(lm);
   if(!lm) return {ok:false,score:0};
   const needed=[11,12,15,16,23,24,25,26,27,28];
   if(needed.some(i=>!lm[i] || (lm[i].visibility!=null && lm[i].visibility<0.20))) return {ok:false,score:0};
@@ -1210,6 +1214,7 @@ async function onResults(results){
   $('presence').textContent=present?'사람 있음':'사람 없음';
 
   if(!present){
+    window.svMobileR15?.observeFrame(null,now,poseInput,poseInput.width,poseInput.height,ready,armed,cooldown,swingStarted);
     // Expose missing-pose state instead of leaving stale diagnostic numbers.
     svAddressDiagnostic(latestLandmarks,{ok:false,score:0,obviousOneLeg:false},{stability:NaN,pelvisSpeed:NaN,ankleSpeed:NaN});
     ready=false;addressLocked=false;stableSince=0;svResetAddressCandidate();swingStarted=false;lastPose=null;lastPoseTime=0;
@@ -1225,13 +1230,23 @@ async function onResults(results){
   // R8: no long-exposure overlay in LIVE capture; render on replay only.
 
   const analysisPose=svAddressAnalysisLandmarks(rotated);
-  const m=poseMotionMetrics(analysisPose,now);
+  // Reuse PC R15's verified tracking / view classification before ADDRESS.
+  const svR15Input=analysisPose!==rotated?raw:poseInput;
+  window.svMobileR15?.observeFrame(analysisPose,now,svR15Input,
+    svR15Input.videoWidth||svR15Input.width,svR15Input.videoHeight||svR15Input.height,
+    ready,armed,cooldown,swingStarted);
+  const svR15MeasuredMotion=poseMotionMetrics(analysisPose,now);
+  const m=window.svMobileR15?.filteredMotion(svR15MeasuredMotion)??svR15MeasuredMotion;
   $('stable').textContent=m.stability.toFixed(3);
   $('wristSpeed').textContent=m.handSpeed.toFixed(2);
 
   // Always refresh diagnostics while pose frames arrive, even when swing detection is OFF.
   const addressCheck=addressSimilarity(analysisPose);
   const isAddress=addressCheck.ok;
+  // Full subject loss may not leave a different golfer's READY armed.
+  if(armed && ready && window.svPcTrackerAccepted===false && !cooldown && !swingStarted){
+    ready=false;addressLocked=false;svResetAddressCandidate();
+  }
   if(armed)svAxisSample(analysisPose,addressCheck);
   svAddressDiagnostic(analysisPose,addressCheck,m);
   if(!armed || cooldown) return;
@@ -1248,9 +1263,11 @@ async function onResults(results){
     // Require a mostly stationary hip/ankle anchor over the whole 850ms window.
     const hip=analysisPose[23]&&analysisPose[24]
       ? {x:(analysisPose[23].x+analysisPose[24].x)/2,y:(analysisPose[23].y+analysisPose[24].y)/2}:null;
-    const ankle=analysisPose[27]&&analysisPose[28]
-      ? {x:(analysisPose[27].x+analysisPose[28].x)/2,y:(analysisPose[27].y+analysisPose[28].y)/2}:null;
-    const validGeometry=isAddress && hip && ankle &&
+    const ankle=window.svMobileR15?.sideActive()
+      ? window.svMobileR15.reliableAnkle(analysisPose)
+      : (analysisPose[27]&&analysisPose[28]
+      ? {x:(analysisPose[27].x+analysisPose[28].x)/2,y:(analysisPose[27].y+analysisPose[28].y)/2}:null);
+    const validGeometry=isAddress && window.svPcTrackerAccepted!==false && hip && ankle &&
       [hip.x,hip.y,ankle.x,ankle.y].every(Number.isFinite) &&
       hip.x>=0 && hip.x<=1 && hip.y>=0 && hip.y<=1 &&
       ankle.x>=0 && ankle.x<=1 && ankle.y>=0 && ankle.y<=1;
@@ -1339,7 +1356,11 @@ async function onResults(results){
       m.handSpeed>=SWING_HAND_SPEED &&
       m.shoulderTurn>=SWING_SHOULDER_TURN;
 
-    if(feetPlanted && golfPattern){
+    // PC R15 side-only 50ms temporal rule. Same four original numeric limits.
+    const strictMotion=feetPlanted && golfPattern;
+    const temporalSideMotion=!strictMotion && !!window.svMobileR15?.temporalCandidate(
+      now,m,addressCheck,feetPlanted,ready,addressLocked,cooldown,swingStarted);
+    if(strictMotion || temporalSideMotion){
       swingStarted=true;ready=false;swingStartAt=now;
       $('swingState').textContent='스윙';
       $('state').className='state impact';$('state').textContent='SWING 감지';
@@ -2104,7 +2125,9 @@ $('disconnect').onclick=()=>{
       if(status && (which==='front'?frontJointOn:sideJointOn)){
         status.textContent=landmarks?'관절 분석: 좌표 '+landmarks.length+'개 수신':'관절 분석: 인체 좌표 미검출';
       }
-      drawReplayJoints(which,landmarks);
+      if(which==='front'?frontJointOn:sideJointOn) drawReplayJoints(which,landmarks);
+      // Independent R15 replay V-zone, only when its left-side checkbox is enabled.
+      window.svReplayVZone?.onPose?.(which,landmarks,which==='front'?frontJointInput:sideJointInput);
     });
     if(isFront) frontReplayPose=p; else sideReplayPose=p;
     return p;
@@ -2285,11 +2308,11 @@ $('disconnect').onclick=()=>{
 
   async function jointLoop(){
     const now=performance.now();
-    if(frontJointOn && !frontPoseBusy && now-frontLastPoseAt>90){
+    if((frontJointOn || window.svReplayVZone?.wants?.('front')) && !frontPoseBusy && now-frontLastPoseAt>90){
       frontPoseBusy=true;frontLastPoseAt=now;
       try{await processReplayPose('front');}catch(e){const st=byId('result');if(st)st.textContent='관절 분석 오류: '+(e.message||String(e));console.error('front replay pose',e);}finally{frontPoseBusy=false;}
     }
-    if(sideJointOn && !sidePoseBusy && now-sideLastPoseAt>90){
+    if((sideJointOn || window.svReplayVZone?.wants?.('side')) && !sidePoseBusy && now-sideLastPoseAt>90){
       sidePoseBusy=true;sideLastPoseAt=now;
       try{await processReplayPose('side');}catch(e){const st=byId('sideResult');if(st)st.textContent='측면 관절 분석 오류: '+(e.message||String(e));console.error('side replay pose',e);}finally{sidePoseBusy=false;}
     }
@@ -3442,5 +3465,6 @@ body #svCompactViewDock #svGhostButton{
 })();
 </script>
 
+<script src="./sv-r15-mobile-replay-vzone.js"></script>
 </body>
 </html>
