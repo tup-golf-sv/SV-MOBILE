@@ -10,7 +10,7 @@
   const mid = (a, b) => ({x:(a.x + b.x) / 2, y:(a.y + b.y) / 2});
   const mix = (a, b, amount) => a + (b - a) * amount;
 
-  function observe(landmarks, aspect) {
+  function observe(landmarks, aspect, live = false) {
     if (!landmarks || !Number.isFinite(aspect) || aspect <= 0) return null;
     const point = (i, confidence = .50) => {
       const p = landmarks[i];
@@ -18,7 +18,9 @@
         p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1
         ? {x:p.x * aspect, y:p.y} : null;
     };
-    const ls = point(11), rs = point(12), lh = point(23), rh = point(24);
+    const torsoConfidence = live ? .20 : .50;
+    const ls = point(11, torsoConfidence), rs = point(12, torsoConfidence);
+    const lh = point(23, torsoConfidence), rh = point(24, torsoConfidence);
     if (!ls || !rs || !lh || !rh) return null;
     const shoulder = mid(ls, rs), hip = mid(lh, rh), torso = distance(shoulder, hip);
     if (torso < .09 || hip.y - shoulder.y < .055) return null;
@@ -44,6 +46,13 @@
       && (feetWidth === null ? shoulderWidth <= .20 && hipWidth <= .15 : feetWidth <= .45)
       ? 'side' : shoulderWidth >= .54 && hipWidth >= .28 && (feetWidth ?? 0) >= .46
       ? 'front' : null;
+    if (live && ![11,12,23,24].every(i => point(i, .35))) {
+      // In profile, the far shoulder and hip can be partially hidden. Require
+      // a well-observed shoulder, hip, knee and ankle on the same visible side.
+      const visibleSide = (point(11) && point(23) && lk && la)
+        || (point(12) && point(24) && rk && ra);
+      if (angle !== 'side' || !visibleSide) return null;
+    }
     const wrists = [point(15, .58), point(16, .58)];
     const grip = wrists.every(Boolean) ? mid(...wrists) : wrists.find(Boolean) || null;
     const bend = Math.abs(shoulder.x - hip.x) / torso;
@@ -148,7 +157,7 @@
           trackedAt = now;
           observed = true;
         }
-      } else {
+      } else if (pose || (candidate && now - candidate.last > HOLD_MS)) {
         candidate = null;
       }
       if (observed) {
@@ -185,10 +194,13 @@
   }
 
   function createMotionGate() {
-    let anchor, start, previous, stationary, checkpoint;
-    function update(pose, ready, now) {
+    let anchor = null, start = null, previous = null, stationary = null, checkpoint = null;
+    function update(pose, ready, now, held = false) {
       if (!pose?.grip) {
-        anchor = start = previous = stationary = checkpoint = null;
+        start = stationary = null;
+        if (!held && (!pose || previous === null || now - previous > HOLD_MS)) {
+          anchor = previous = checkpoint = null;
+        }
         return false;
       }
       const relative = {
@@ -537,7 +549,7 @@ function svPcSideAddressSimilarity(lm){
   // are still required; no missing landmark is synthesized.
   // 850ms dwell, motion, tracking, and front-view classifier untouched.
   const measuredLeg=legChains.length>0;
-  return {ok:score>=5 && bodyCentered && checks[4][1] && checks[5][1] &&
+  return {ok:score>=5 && bodyCentered && handsOk && checks[4][1] && checks[5][1] &&
     measuredLeg && !obviousOneLeg,score,obviousOneLeg,checks,mode,legChains};
 }
 
@@ -549,7 +561,7 @@ function svPcSideAddressSimilarity(lm){
   const svMobileTemporal=root.svPcR15CreateSideTemporalGate?.();
   const shirt=document.createElement('canvas');shirt.width=40;shirt.height=30;
   const shirtCtx=shirt.getContext('2d',{willReadFrequently:true});
-  let cameraToken=null,latest=null,currentPose=null,confirmedMotion=false;
+  let latest=null,currentPose=null,confirmedMotion=false;
   let sideSince=null,sideSamples=0,stableSide=false,lastOrientation=null;
   let temporalEnabled=true;
   let frames=0,acceptedFrames=0;
@@ -557,16 +569,15 @@ function svPcSideAddressSimilarity(lm){
   function reset(){
     svMobileTracking.reset();svMobileGate.update(null,false,0);svMobileTemporal?.reset();
     latest=currentPose=null;confirmedMotion=false;sideSince=null;sideSamples=0;stableSide=false;
-    root.svPcPipeline={phase:'searching',accepted:false,angle:null,poseAngle:null,stableSide:false};
+    root.svPcPipeline={phase:'searching',accepted:false,poseSeen:false,angle:null,poseAngle:null,stableSide:false};
     root.svPcTrackerAccepted=false;
   }
   function observeFrame(lm,now,image,width,height,ready,armed,cooldown,swingStarted){
     if(!image||!width||!height||!Number.isFinite(now)){
       reset();return null;
     }
-    const token=image; // The caller owns the camera stream; reset on explicit disconnect.
     if(lastOrientation!==width+'x'+height){reset();lastOrientation=width+'x'+height;}
-    currentPose=observe(lm,width/height);
+    currentPose=observe(lm,width/height,true);
     let appearance=null;
     const region=currentPose && torsoRegion(currentPose,width,height);
     if(region&&shirtCtx){
@@ -578,13 +589,15 @@ function svPcSideAddressSimilarity(lm){
     if(latest.accepted&&currentPose?.angle==='side'){
       if(sideSince===null)sideSince=now;
       sideSamples++;
-    }else{sideSince=null;sideSamples=0;}
+    }else if(latest.phase!=='held'){sideSince=null;sideSamples=0;}
     stableSide=sideSince!==null && sideSamples>=3 && now-sideSince>=ADDRESS_MS;
-    confirmedMotion=svMobileGate.update(latest.accepted&&armed&&!cooldown?currentPose:null,!!ready,now);
+    confirmedMotion=svMobileGate.update(latest.accepted&&armed&&!cooldown?currentPose:null,
+      !!ready,now,armed&&!cooldown&&latest.phase==='held');
+    if(!latest.accepted)svMobileTemporal?.reset();
     root.svPcTrackerAccepted=!armed||!!cooldown||!!swingStarted||!!latest.accepted;
     frames++;if(latest.accepted)acceptedFrames++;
     root.svPcPipeline={frames,trustedFrames:acceptedFrames,phase:latest.phase,
-      accepted:!!latest.accepted,angle:latest.angle,poseAngle:currentPose?.angle??null,
+      accepted:!!latest.accepted,poseSeen:!!currentPose,angle:latest.angle,poseAngle:currentPose?.angle??null,
       stableSide,reason:latest.phase==='tracked'?'골퍼 추적 중':'골퍼 추적 확인 중'};
     return root.svPcPipeline;
   }
