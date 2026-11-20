@@ -19,6 +19,7 @@ import java.util.concurrent.*;
 public class MainActivity extends Activity {
     static final String ORIGIN="https://appassets.androidplatform.net";
     private WebView web;
+    private static final long TRANSFER_IDLE_MS = 90_000;
     private PermissionRequest cameraRequest;
     private ValueCallback<Uri[]> chooser;
     private final ExecutorService io=Executors.newSingleThreadExecutor();
@@ -26,7 +27,7 @@ public class MainActivity extends Activity {
     private ProBilling pro;
     private TextView proStatus;
     static class Transfer {
-        File file; OutputStream out; long expected, written; String mode,mime;
+        File file; OutputStream out; long expected, written, touchedAt; String mode,mime;
     }
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
@@ -76,12 +77,17 @@ public class MainActivity extends Activity {
     private String readAsset(String name)throws Exception{try(InputStream in=getAssets().open(name)){ByteArrayOutputStream bytes=new ByteArrayOutputStream();ProBilling.copy(in,bytes);return bytes.toString("UTF-8");}}
     private void handle(JSONObject m,JSONObject result)throws Exception{
         String id=m.getString("session"),action=m.getString("action");
+        long now=SystemClock.elapsedRealtime();
         if(action.equals("begin")){
+            for(String activeId:new ArrayList<>(transfers.keySet())){
+                if(now-transfers.get(activeId).touchedAt>TRANSFER_IDLE_MS)cleanup(activeId);
+            }
             if(!transfers.isEmpty())throw new IOException("다른 저장이 진행 중입니다.");
             Transfer t=new Transfer();t.expected=m.getLong("size");t.mode=m.getString("mode");t.mime=m.getString("mime");
             if(t.expected<=0||t.expected>100L*1024*1024||!Arrays.asList("local","cloud").contains(t.mode)||!Arrays.asList("video/mp4","video/webm").contains(t.mime))throw new IOException("지원하지 않는 영상 크기 또는 형식입니다.");
             if(t.mode.equals("cloud"))pro.requireEntitlement();
-            t.file=File.createTempFile("swing-",".tmp",getCacheDir());t.out=new FileOutputStream(t.file);transfers.put(id,t);return;
+            t.file=File.createTempFile("swing-",".tmp",getCacheDir());t.out=new FileOutputStream(t.file);
+            t.touchedAt=now;transfers.put(id,t);return;
         }
         Transfer t=transfers.get(id);if(t==null)throw new IOException("저장 세션이 만료되었습니다.");
         if(action.equals("abort")){cleanup(id);return;}
@@ -90,7 +96,7 @@ public class MainActivity extends Activity {
                 String data=m.getString("data");if(data.length()>270000)throw new IOException("영상 조각이 너무 큽니다.");
                 byte[] bytes=android.util.Base64.decode(data,android.util.Base64.NO_WRAP);
                 if(t.written+bytes.length>t.expected)throw new IOException("영상 크기가 일치하지 않습니다.");
-                t.out.write(bytes);t.written+=bytes.length;return;
+                t.out.write(bytes);t.written+=bytes.length;t.touchedAt=now;return;
             }
             if(!action.equals("finish")||t.written!=t.expected)throw new IOException("영상 전송이 완료되지 않았습니다.");
             t.out.close();
@@ -110,7 +116,23 @@ public class MainActivity extends Activity {
     private void cleanup(String id){Transfer t=transfers.remove(id);if(t!=null){try{t.out.close();}catch(Exception ignored){}t.file.delete();}}
     void toast(String s){runOnUiThread(()->Toast.makeText(this,s,Toast.LENGTH_LONG).show());}
     @Override protected void onActivityResult(int code,int result,Intent data){super.onActivityResult(code,result,data);if(code==20&&chooser!=null){chooser.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result,data));chooser=null;}}
-    @Override protected void onResume(){super.onResume();if(pro!=null)pro.restore(false);}
+    @Override protected void onResume(){
+        super.onResume();
+        if(web!=null)web.onResume();
+        if(pro!=null)pro.restore(false);
+    }
+    @Override protected void onStop(){
+        if(cameraRequest!=null){
+            PermissionRequest pending=cameraRequest;
+            cameraRequest=null;
+            pending.deny();
+        }
+        if(web!=null){
+            web.evaluateJavascript("if(typeof svSuspendCamera==='function')svSuspendCamera();",null);
+            web.onPause();
+        }
+        super.onStop();
+    }
     @Override protected void onDestroy(){pro.close();web.destroy();io.execute(()->{for(String id:new ArrayList<>(transfers.keySet()))cleanup(id);});io.shutdown();super.onDestroy();}
     @Override public void onBackPressed(){if(web.canGoBack())web.goBack();else super.onBackPressed();}
 }

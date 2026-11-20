@@ -76,7 +76,7 @@ for sv_method in aUnpaidCloudRequestDoesNotUpload bCanvasRecordingReplayAndNativ
   fi
 done
 cat android-evidence/aUnpaidCloudRequestDoesNotUpload.txt android-evidence/bCanvasRecordingReplayAndNativeSave.txt android-evidence/cCameraReplayAndMediaStoreRoundTrip.txt android-evidence/dActualPreRollCapture.txt > android-evidence/instrumentation.txt
-if [[ "$sv_target_package" == *.aitest || "$sv_target_package" == *.tracktest ]]; then
+if [[ "$sv_target_package" == *.aitest || "$sv_target_package" == *.tracktest || "$sv_target_package" == *.stability ]]; then
   sv_analysis_test=kr.co.tupgolf.svmobile.SwingAnalysisSmokeTest#analysisScreenOpensWithSeparateAAndBControls
   timeout 90 adb shell am instrument -w -e class "$sv_analysis_test" "$sv_runner" |
     tee android-evidence/swing-analysis-ui.txt

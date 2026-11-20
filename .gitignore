@@ -10,5 +10,8 @@ server/data/
 androidapp/app/src/main/assets/index.html
 androidapp/app/src/main/assets/manifest.webmanifest
 androidapp/app/src/main/assets/sv-mobile-icon.svg
+androidapp/app/src/main/assets/sv-r15-mobile-core.js
+androidapp/app/src/main/assets/sv-r15-mobile-temporal.js
+androidapp/app/src/main/assets/sv-r15-mobile-replay-vzone.js
 androidapp/android-evidence/
 androidapp/ci-artifacts/

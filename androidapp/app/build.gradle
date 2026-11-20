@@ -19,11 +19,11 @@ dependencies {
     implementation 'androidx.webkit:webkit:1.12.1'
     implementation 'com.android.billingclient:billing:8.3.0'
 }
-// Package the existing web app byte-for-byte. Production index.html is never edited.
 tasks.register('syncWebApp', Copy) {
     from rootProject.file('../index.html')
     from rootProject.file('../manifest.webmanifest')
     from rootProject.file('../sv-mobile-icon.svg')
+    from rootProject.files('../sv-r15-mobile-core.js', '../sv-r15-mobile-temporal.js', '../sv-r15-mobile-replay-vzone.js')
     into 'src/main/assets'
 }
 preBuild.dependsOn syncWebApp
@@ -35,19 +35,18 @@ dependencies {
     androidTestImplementation 'androidx.test:core:1.6.1'
 }
 
-// The experimental analyzer is only present in the side-by-side debug app.
 android.buildTypes.debug {
-    applicationIdSuffix '.tracktest'
-    versionNameSuffix '-tracking-vzone-test2'
+    applicationIdSuffix '.stability'
+    versionNameSuffix '-stability'
 }
 androidComponents.onVariants(androidComponents.selector().withBuildType('debug')) { variant ->
-    variant.outputs.each { it.versionCode.set(5) }
+    variant.outputs.each { it.versionCode.set(6) }
 }
 dependencies {
     debugImplementation 'com.google.mlkit:pose-detection:18.0.0-beta5'
 }
 
-// This asset override exists only in the debug APK. The existing site stays byte-identical.
+// Use the packaged model and tracking overlay in the Android test app.
 def trackingAssets = layout.buildDirectory.dir('generated/trackingAssets')
 android.sourceSets.debug.assets.srcDir(trackingAssets)
 tasks.register('prepareTrackingPage') {

@@ -576,13 +576,27 @@ body>#svFloatingReplay #svAutoReplaySpeed{height:34px!important;min-height:0!imp
 </div>
 </div>
 
+<script src="./sv-r15-mobile-temporal.js"></script>
+<script src="./sv-r15-mobile-core.js?v=20261120-ready"></script>
 <script>
 const $=id=>document.getElementById(id);
 const raw=$('raw'), view=$('view'), ctx=view.getContext('2d');
 const poseInput=document.createElement('canvas'), poseInputCtx=poseInput.getContext('2d');
 const replay=$('replay'), replayCanvas=$('replayCanvas'), rctx=replayCanvas.getContext('2d');
 
+function svIsMobileCamera(){
+  const ua=navigator.userAgent||'';
+  const tabletOrPhone=/Android|iPhone|iPad|iPod/i.test(ua) ||
+    (navigator.maxTouchPoints>1 && window.matchMedia('(pointer: coarse)').matches);
+  const television=/SmartTV|Android TV|GoogleTV|Tizen|WebOS|AFT\w*/i.test(ua);
+  return tabletOrPhone && !television;
+}
+function svInitialPoseRotation(){return svIsMobileCamera()?0:90;}
+const svDefaultPoseRotation=svInitialPoseRotation();
+let svPoseRotation=svDefaultPoseRotation;
+
 let stream=null, pose=null, armed=false, processing=false, raf=null;
+let svCameraEpoch=0,svConnectionPending=false;
 let recorder=null, chunks=[], recording=false;
 let svStopTimer=null;
 const SV_PREROLL_MS=1500,SV_CAPTURE_FPS=20,SV_FRAME_STEP=1000/SV_CAPTURE_FPS;
@@ -597,6 +611,7 @@ function svSampleFrame(){
     const q=svRolling[key];
     const last=q[q.length-1];
     if(last&&now-last.t<SV_FRAME_STEP*.8)continue;
+    if(svCaptureActive&&q.length>Math.ceil((SV_PREROLL_MS+SWING_CAPTURE_MS)/SV_FRAME_STEP))continue;
     const c=document.createElement('canvas');
     const scale=Math.min(1,640/Math.max(v.videoWidth,v.videoHeight));
     c.width=Math.max(1,Math.round(v.videoWidth*scale));
@@ -610,7 +625,7 @@ function svStartRolling(){
   if(svCaptureInterval)return;
   svCaptureInterval=setInterval(svSampleFrame,SV_FRAME_STEP);
 }
-async function svEncodeFrames(frames){
+async function svEncodeFrames(frames,cameraEpoch=svCameraEpoch){
   if(!frames.length)return null;
   const canvas=document.createElement('canvas');
   canvas.width=frames[0].frame.width;canvas.height=frames[0].frame.height;
@@ -625,7 +640,7 @@ async function svEncodeFrames(frames){
   const stopped=new Promise(resolve=>rec.onstop=()=>resolve(new Blob(pieces,{type:rec.mimeType||'video/webm'})));
   rec.start(100);
   const tick=1000/SV_CAPTURE_FPS;
-  for(let i=0;i<frames.length;i++){
+  for(let i=0;i<frames.length&&cameraEpoch===svCameraEpoch;i++){
     cx.drawImage(frames[i].frame,0,0,canvas.width,canvas.height);
     await new Promise(r=>setTimeout(r,tick));
   }
@@ -634,16 +649,15 @@ async function svEncodeFrames(frames){
   videoStream.getTracks().forEach(t=>t.stop());
   return blob;
 }
-function svLoadCapturedFront(blob){
+function svLoadCapturedFront(blob,rotation){
   if(!blob)return;
   latestReplayBlob=blob;
+  latestReplayRotation=rotation;
+  window.svFrontRotation=rotation;
+  $('frontRotateBtn').textContent='영상회전 '+rotation+'°';
   if(replay.src)URL.revokeObjectURL(replay.src);
   replay.src=URL.createObjectURL(blob);replay.loop=true;replay.muted=true;replay.load();
   replay.onloadedmetadata=()=>{
-    if(raw.videoHeight>raw.videoWidth&&replay.videoHeight>replay.videoWidth){
-      window.svFrontRotation=0;
-      const b=document.getElementById('frontRotateBtn');if(b)b.textContent='영상회전 0°';
-    }
     ['replayPlay','replayPause','sendA','sendB','frontJointBtn','frameBack','frameNext','speedMenuBtn','frontRotateBtn','replaySeek'].forEach(id=>{const el=$(id);if(el)el.disabled=false});
     replay.playbackRate=window.svGetAutoReplaySpeed?window.svGetAutoReplaySpeed():0.5;
     $('timeTotal').textContent=replay.duration.toFixed(2);
@@ -656,23 +670,27 @@ function svStartPreRollCapture(){
   if(svCaptureActive)return;
   svCaptureActive=true;
   const detectedAt=performance.now();
+  const cameraEpoch=svCameraEpoch;
+  const frontRotation=svPoseRotation;
   for(const key of ['front','side']){
     const q=svRolling[key];
     while(q.length&&q[0].t<detectedAt-SV_PREROLL_MS)q.shift();
   }
   setTimeout(async()=>{
+    if(cameraEpoch!==svCameraEpoch)return;
     const front=svRolling.front.slice(),side=svRolling.side.slice();
     svRolling.front=[];svRolling.side=[];
     svCaptureActive=false;
     try{
-      const [frontBlob,sideBlob]=await Promise.all([svEncodeFrames(front),svEncodeFrames(side)]);
-      svLoadCapturedFront(frontBlob);
+      const [frontBlob,sideBlob]=await Promise.all([svEncodeFrames(front,cameraEpoch),svEncodeFrames(side,cameraEpoch)]);
+      if(cameraEpoch!==svCameraEpoch)return;
+      svLoadCapturedFront(frontBlob,frontRotation);
       if(sideBlob&&typeof window.svLoadCapturedSide==='function')window.svLoadCapturedSide(sideBlob);
-    }catch(e){console.error('R6 capture',e);$('status').textContent='R6 녹화 인코딩 실패: '+(e.message||e);}
+    }catch(e){if(cameraEpoch===svCameraEpoch){console.error('capture',e);$('status').textContent='녹화 처리 실패: '+(e.message||e);}}
   },SWING_CAPTURE_MS);
 }
-let latestReplayBlob=null;
-let ready=false, readyAt=0, stableSince=0, swingStarted=false, swingStartAt=0, addressLocked=false;
+let latestReplayBlob=null,latestReplayRotation=90;
+let ready=false, readyAt=0, readyCuePlayed=false, swingStarted=false, swingStartAt=0, addressLocked=false;
 let lastPose=null, lastPoseTime=0, lastWristSpeed=0;
 let latestLandmarks=null, cooldown=false;
 
@@ -686,10 +704,21 @@ const SWING_CAPTURE_MS=3200;
  // Auto-adaptive ADDRESS confirmation: tolerate short landmark dropouts,
  // but require repeated real frames and recent low-motion evidence.
  let svAddressCandidateSince=0,svAddressLastGood=0,svAddressGoodFrames=0,svAddressTotalFrames=0;
- let svAddressMotionEMA=null,svAddressLastFrame=0,svAddressAnchorHip=null,svAddressAnchorAnkle=null;
- const SV_ADDRESS_GAP_MS=180,SV_ADDRESS_MIN_GOOD_FRAMES=6;
+ let svAddressLastFrame=0,svAddressAnchorHip=null,svAddressAnchorAnkle=null;
+ const SV_ADDRESS_GAP_MS=420,SV_ADDRESS_MIN_GOOD_FRAMES=6;
  function svResetAddressCandidate(){
-   svAddressCandidateSince=0;svAddressLastGood=0;svAddressGoodFrames=0;svAddressTotalFrames=0;svAddressMotionEMA=null;svAddressAnchorHip=null;svAddressAnchorAnkle=null;
+   svAddressCandidateSince=0;svAddressLastGood=0;svAddressGoodFrames=0;svAddressTotalFrames=0;svAddressAnchorHip=null;svAddressAnchorAnkle=null;
+ }
+ function svClearReady(){
+   ready=false;addressLocked=false;readyAt=0;readyCuePlayed=false;
+   svAddressLastFrame=0;svResetAddressCandidate();lastPose=null;lastPoseTime=0;
+   $('overlay').style.display='none';
+ }
+ function svShowReady(){
+   $('addressState').textContent='LOCK';
+   $('state').className='state ready';
+   $('state').textContent=readyCuePlayed?'READY · 삑 — 지금 스윙':'READY';
+   $('status').textContent=readyCuePlayed?'스윙하세요.':'삑 소리가 나면 스윙하세요.';
  }
 
 
@@ -755,48 +784,51 @@ function personVisible(lm){
 }
 
 function poseMotionMetrics(lm, now){
+  const copy=p=>p?{x:p.x,y:p.y,visibility:p.visibility}:null;
   if(!lastPose || !lastPoseTime){
-    lastPose=lm.map(p=>({x:p.x,y:p.y}));
+    lastPose=lm.map(copy);
     lastPoseTime=now;
     return {stability:0,handSpeed:0,shoulderTurn:0,pelvisSpeed:0,ankleSpeed:0};
   }
 
   const dt=Math.max(0.016,(now-lastPoseTime)/1000);
+  const reliable=p=>p&&Number.isFinite(p.x)&&Number.isFinite(p.y)&&(p.visibility??1)>=.20;
+  const paired=i=>reliable(lm[i])&&reliable(lastPose[i]);
   const ids=[11,12,13,14,15,16,23,24,25,26,27,28];
   let sum=0,n=0;
   for(const i of ids){
-    if(lm[i] && lastPose[i]){sum+=dist(lm[i],lastPose[i]);n++}
+    if(paired(i)){sum+=dist(lm[i],lastPose[i]);n++}
   }
   const stability=n?sum/n:0;
+  // Use the same measured joints in both frames when one side is occluded.
+  const movement=(left,right)=>{
+    const joints=[left,right].filter(paired);
+    if(!joints.length)return null;
+    return {
+      x:joints.reduce((sum,i)=>sum+lm[i].x-lastPose[i].x,0)/joints.length,
+      y:joints.reduce((sum,i)=>sum+lm[i].y-lastPose[i].y,0)/joints.length
+    };
+  };
+  const pelvis=movement(23,24),ankles=movement(27,28),hands=movement(15,16);
+  const pelvisSpeed=pelvis?Math.hypot(pelvis.x,pelvis.y)/dt:Infinity;
+  const ankleSpeed=ankles?Math.hypot(ankles.x,ankles.y)/dt:Infinity;
+  const handSpeed=hands&&pelvis?Math.hypot(hands.x-pelvis.x,hands.y-pelvis.y)/dt:0;
 
-  const pelvis={x:(lm[23].x+lm[24].x)/2,y:(lm[23].y+lm[24].y)/2};
-  const prevPelvis={x:(lastPose[23].x+lastPose[24].x)/2,y:(lastPose[23].y+lastPose[24].y)/2};
-  const pelvisSpeed=dist(pelvis,prevPelvis)/dt;
+  let shoulderTurn=0;
+  if(paired(11)&&paired(12)){
+    const angle=pose=>Math.atan2(pose[12].y-pose[11].y,pose[12].x-pose[11].x);
+    shoulderTurn=Math.abs(angle(lm)-angle(lastPose));
+    if(shoulderTurn>Math.PI)shoulderTurn=2*Math.PI-shoulderTurn;
+  }
 
-  const ankles={x:(lm[27].x+lm[28].x)/2,y:(lm[27].y+lm[28].y)/2};
-  const prevAnkles={x:(lastPose[27].x+lastPose[28].x)/2,y:(lastPose[27].y+lastPose[28].y)/2};
-  const ankleSpeed=dist(ankles,prevAnkles)/dt;
-
-  // 양손의 중간점을 골반 기준으로 계산.
-  // 걷기 때는 양팔이 반대로 흔들려 중간점 이동이 상대적으로 작고,
-  // 골프 스윙 때는 두 손이 함께 크게 움직인다.
-  const hands={x:(lm[15].x+lm[16].x)/2,y:(lm[15].y+lm[16].y)/2};
-  const prevHands={x:(lastPose[15].x+lastPose[16].x)/2,y:(lastPose[15].y+lastPose[16].y)/2};
-  const relHands={x:hands.x-pelvis.x,y:hands.y-pelvis.y};
-  const prevRelHands={x:prevHands.x-prevPelvis.x,y:prevHands.y-prevPelvis.y};
-  const handSpeed=dist(relHands,prevRelHands)/dt;
-
-  const shoulderNow=Math.atan2(lm[12].y-lm[11].y,lm[12].x-lm[11].x);
-  const shoulderPrev=Math.atan2(lastPose[12].y-lastPose[11].y,lastPose[12].x-lastPose[11].x);
-  let shoulderTurn=Math.abs(shoulderNow-shoulderPrev);
-  if(shoulderTurn>Math.PI) shoulderTurn=2*Math.PI-shoulderTurn;
-
-  lastPose=lm.map(p=>({x:p.x,y:p.y}));
+  lastPose=lm.map(copy);
   lastPoseTime=now;
   return {stability,handSpeed,shoulderTurn,pelvisSpeed,ankleSpeed};
 }
 
 function addressSimilarity(lm){
+  // Verified PC R15 side-only address, never replace original FRONT conditions.
+  if(window.svMobileR15?.sideActive()) return window.svMobileR15.sideAddress(lm);
   if(!lm) return {ok:false,score:0};
   const needed=[11,12,15,16,23,24,25,26,27,28];
   if(needed.some(i=>!lm[i] || (lm[i].visibility!=null && lm[i].visibility<0.20))) return {ok:false,score:0};
@@ -857,23 +889,20 @@ function addressSimilarity(lm){
     ['손-골반',handFromHips<=1.55,handFromHips,'≤1.55'],
     ['다리 길이',hipToKnee>=0.13 && kneeToAnkle>=0.13,Math.min(hipToKnee,kneeToAnkle),'≥0.13']
   ];
-  // 기존 V11.1 계열처럼 7개 중 5개 이상이면 어드레스 후보.
-  // 단, 명확한 짝다리로 판단되면 ADDRESS로 인정하지 않는다.
-  return {ok:(score>=5 && !obviousOneLeg),score,obviousOneLeg,checks};
+  // 손 간격과 높이, 골반 대비 손 위치가 맞는 자세에 5점 기준을 적용한다.
+  return {ok:score>=5 && checks[3][1] && checks[4][1] && checks[5][1] && !obviousOneLeg,
+    score,obviousOneLeg,checks};
 }
 
 
-// Project MediaPipe's 90-degree-normalized source points onto the actual
-// object-fit:contain camera pixels, then apply the user's display rotation.
-// This is DISPLAY ONLY: address/READY logic still receives original landmarks.
+// Project the model's rotated points through the camera pixels into the preview.
 function svPoseDisplayPoint(p){
-  // MediaPipe receives the camera source rotated +90 degrees.
-  // Invert that rotation to source pixels, then reproduce the *actual*
-  // HTMLVideoElement object-fit:contain mapping and its CSS rotation.
-  // Use measured DOM sizes, not a guessed stage aspect ratio.
   const W=view.width,H=view.height;
   if(!raw.videoWidth||!raw.videoHeight)return {x:p.x*W,y:p.y*H};
-  const sourceX=p.y,sourceY=1-p.x;
+  const inputAngle=svPoseRotation*Math.PI/180;
+  const px=p.x-.5,py=p.y-.5;
+  const sourceX=.5+px*Math.cos(inputAngle)+py*Math.sin(inputAngle);
+  const sourceY=.5-px*Math.sin(inputAngle)+py*Math.cos(inputAngle);
   const vw=raw.videoWidth,vh=raw.videoHeight;
   const boxW=raw.clientWidth,boxH=raw.clientHeight;
   if(!boxW||!boxH)return {x:p.x*W,y:p.y*H};
@@ -883,7 +912,7 @@ function svPoseDisplayPoint(p){
               fit==='fill'?null:Math.min(boxW/vw,boxH/vh);
   const dx=(sourceX-.5)*vw*(scale===null?boxW/vw:scale);
   const dy=(sourceY-.5)*vh*(scale===null?boxH/vh:scale);
-  const angle=((window.svPreviewRotationDeg??90)%360+360)%360;
+  const angle=window.svPreviewRotationDeg??svDefaultPoseRotation;
   const rad=angle*Math.PI/180;
   // raw and view are centered on the same liveStage, but the canvas
   // can have a different CSS pixel origin; account for that explicitly.
@@ -1076,7 +1105,7 @@ function svAxisSample(lm,check){
 function svAxisReport(){
  const t=svAxisTrace,labels=['골반 중앙','발 간격','무릎 간격','양손 간격','손 높이','손-골반','다리 길이'];
  return '\n\n[카메라·관절 좌표 진단]\n원본 영상 '+(raw.videoWidth||0)+'×'+(raw.videoHeight||0)+' / MediaPipe 입력 '+poseInput.width+'×'+poseInput.height+
- ' / 입력 회전 +90도 / 화면 회전 '+(window.svPreviewRotationDeg??90)+'도 / 판정 좌표 '+(window.matchMedia('(orientation: portrait) and (pointer: coarse)').matches && raw.videoHeight>raw.videoWidth?'원본 세로축 복원':'기존 좌표')+
+ ' / 입력 회전 '+svPoseRotation+'도 / 화면 회전 '+(window.svPreviewRotationDeg??svDefaultPoseRotation)+'도'+
  '\n좌표 샘플 '+t.frames+'프레임 / 양발 X차이 0.02 미만 '+t.nearZeroFeet+'회 / 무릎 X차이 0.02 미만 '+t.nearZeroKnees+'회'+
  '\n관절 누락·저신뢰(0.20 미만): '+[11,12,15,16,23,24,25,26,27,28].map(i=>i+'='+ (t.missing[i]||0)).join(' ')+
  '\n조건 실패 횟수: '+labels.map((v,i)=>v+' '+t.failed[i]).join(' / ')+
@@ -1100,7 +1129,10 @@ function svAddressSnapshot(lm,check,m){
   const missing=needed.filter(i=>!lm?.[i]||(lm[i].visibility!=null&&lm[i].visibility<0.20));
   const fail=[];
   if(missing.length)fail.push('관절 부족: '+missing.map(i=>names[i]).join(', '));
-  if(!check.ok)fail.push(check.obviousOneLeg?'하체 비대칭':'어드레스 점수 부족');
+  if(!check.ok){
+    const handPositionFailed=check.checks?.slice(3,6).some(([,pass])=>!pass);
+    fail.push(check.obviousOneLeg?'하체 비대칭':handPositionFailed?'손 위치 확인':'어드레스 자세 확인');
+  }
   if(!(m.stability<0.020))fail.push('안정도 초과');
   if(!(m.pelvisSpeed<MAX_PELVIS_SPEED))fail.push('골반 이동 초과');
   if(!(m.ankleSpeed<MAX_ANKLE_SPEED))fail.push('발목 이동 초과');
@@ -1181,19 +1213,9 @@ function svAddressDiagnostic(lm,check,m){
     '\nLOCK '+(addressLocked?'ON':'OFF');
 }
 
-// Mobile portrait: the observed +90° MediaPipe frame has its anatomical
-// left/right axis on pose Y. Convert only analysis landmarks back to the
-// camera-source portrait axes. Rendering continues to use original landmarks.
-function svAddressAnalysisLandmarks(lm){
-  if(!lm)return lm;
-  const portraitPhone=window.matchMedia('(orientation: portrait) and (pointer: coarse)').matches;
-  const rotatedInput=raw.videoWidth>0 && raw.videoHeight>raw.videoWidth &&
-    poseInput.width===raw.videoHeight && poseInput.height===raw.videoWidth;
-  if(!portraitPhone || !rotatedInput)return lm;
-  return lm.map(p=>p?{...p,x:p.y,y:1-p.x}:p);
-}
 async function onResults(results){
   processing=false;
+  if(svPoseRotation!==(window.svPreviewRotationDeg??svDefaultPoseRotation))return;
   lastPoseRenderAt=performance.now();
   latestLandmarks=results.poseLandmarks||null;
   const now=performance.now();
@@ -1206,26 +1228,38 @@ async function onResults(results){
   ctx.clearRect(0,0,view.width,view.height);
   sizeRawPreview();
 
-  const present=personVisible(latestLandmarks);
+  const pipeline=window.svMobileR15?.observeFrame(latestLandmarks,now,poseInput,
+    poseInput.width,poseInput.height,ready,armed,cooldown,swingStarted);
+  const present=personVisible(latestLandmarks)||!!pipeline?.poseSeen;
   $('presence').textContent=present?'사람 있음':'사람 없음';
 
-  if(!present){
-    // Expose missing-pose state instead of leaving stale diagnostic numbers.
-    svAddressDiagnostic(latestLandmarks,{ok:false,score:0,obviousOneLeg:false},{stability:NaN,pelvisSpeed:NaN,ankleSpeed:NaN});
-    ready=false;addressLocked=false;stableSince=0;svResetAddressCandidate();swingStarted=false;lastPose=null;lastPoseTime=0;
+  if(!present || (armed && pipeline && !pipeline.accepted && !cooldown && !swingStarted)){
+    const check=present?addressSimilarity(latestLandmarks):{ok:false,score:0,obviousOneLeg:false};
+    svAddressDiagnostic(latestLandmarks,check,{stability:NaN,pelvisSpeed:NaN,ankleSpeed:NaN});
+    if(!armed || cooldown || swingStarted)return;
+
+    const held=pipeline?.phase==='held';
+    if(held){
+      // Resume only after the tracker sees the same golfer again.
+      lastPose=null;lastPoseTime=0;
+      if(svAddressCandidateSince && now-svAddressLastGood<=SV_ADDRESS_GAP_MS)svAddressTotalFrames++;
+    }else{
+      if(svAddressCandidateSince)svReadyTrace.resets.invalidGeometry++;
+      svClearReady();
+    }
     $('stable').textContent='0.00';$('wristSpeed').textContent='0.00';
-    $('addressState').textContent='OFF';$('swingState').textContent='대기';
-    $('state').className='state wait';$('state').textContent='사람 없음 · 대기';
-    $('status').textContent='최근 정상 스윙 리플레이는 그대로 유지됩니다.';
+    $('addressState').textContent=held&&ready?'LOCK 대기':'OFF';
+    $('swingState').textContent='대기';
+    $('state').className='state wait';
+    $('state').textContent=held?'골퍼 재확인 중':present?'골퍼 위치 확인 중':'사람 없음 · 대기';
+    $('status').textContent=held?'자세가 다시 확인되면 레디를 이어갑니다.':'카메라에 골퍼의 전신이 들어오게 하세요.';
+    $('overlay').style.display='none';
     return;
   }
 
-  // MediaPipe 입력 자체를 90° 정상화했으므로 관절좌표를 그대로 사용한다.
-  const rotated=latestLandmarks;
-  // R8: no long-exposure overlay in LIVE capture; render on replay only.
-
-  const analysisPose=svAddressAnalysisLandmarks(rotated);
-  const m=poseMotionMetrics(analysisPose,now);
+  const analysisPose=latestLandmarks;
+  const measuredMotion=poseMotionMetrics(analysisPose,now);
+  const m=window.svMobileR15?.filteredMotion(measuredMotion)??measuredMotion;
   $('stable').textContent=m.stability.toFixed(3);
   $('wristSpeed').textContent=m.handSpeed.toFixed(2);
 
@@ -1244,12 +1278,19 @@ async function onResults(results){
     const elapsed=svAddressLastFrame?now-svAddressLastFrame:0;
     svAddressLastFrame=now;
     if(elapsed>450){if(svAddressCandidateSince){svReadyTrace.resets.frameGap++;svReadyTrace.lastReason='프레임 간격 '+Math.round(elapsed)+'ms';}svResetAddressCandidate();}
+    if(svAddressCandidateSince && now-svAddressLastGood>SV_ADDRESS_GAP_MS){
+      svReadyTrace.resets.invalidGeometry++;
+      svReadyTrace.lastReason='어드레스 확인 중단';
+      svResetAddressCandidate();
+    }
     // Confirm address from repeated pose geometry, not frame-to-frame pixel jitter.
     // Require a mostly stationary hip/ankle anchor over the whole 850ms window.
     const hip=analysisPose[23]&&analysisPose[24]
       ? {x:(analysisPose[23].x+analysisPose[24].x)/2,y:(analysisPose[23].y+analysisPose[24].y)/2}:null;
-    const ankle=analysisPose[27]&&analysisPose[28]
-      ? {x:(analysisPose[27].x+analysisPose[28].x)/2,y:(analysisPose[27].y+analysisPose[28].y)/2}:null;
+    const ankle=window.svMobileR15?.sideActive()
+      ? window.svMobileR15.reliableAnkle(analysisPose)
+      : (analysisPose[27]&&analysisPose[28]
+      ? {x:(analysisPose[27].x+analysisPose[28].x)/2,y:(analysisPose[27].y+analysisPose[28].y)/2}:null);
     const validGeometry=isAddress && hip && ankle &&
       [hip.x,hip.y,ankle.x,ankle.y].every(Number.isFinite) &&
       hip.x>=0 && hip.x<=1 && hip.y>=0 && hip.y<=1 &&
@@ -1271,17 +1312,13 @@ async function onResults(results){
       }else{
         svAddressLastGood=now;svAddressGoodFrames++;svAddressTotalFrames++;
       }
-    }else if(svAddressCandidateSince && now-svAddressLastGood<=SV_ADDRESS_GAP_MS){
+    }else if(svAddressCandidateSince){
       svAddressTotalFrames++;
-    }else{
-      if(svAddressCandidateSince){svReadyTrace.maxCandidateMs=Math.max(svReadyTrace.maxCandidateMs,now-svAddressCandidateSince);svReadyTrace.resets.invalidGeometry++;svReadyTrace.lastReason=addressCheck.obviousOneLeg?'하체 비대칭':'자세 또는 좌표 탈락';}
-      svResetAddressCandidate();
     }
     const held=svAddressCandidateSince?now-svAddressCandidateSince:0;
     svReadyTrace.maxCandidateMs=Math.max(svReadyTrace.maxCandidateMs,held);
-    const confirmed=svAddressCandidateSince && svAddressGoodFrames>=SV_ADDRESS_MIN_GOOD_FRAMES &&
-      svAddressTotalFrames>0 && svAddressGoodFrames/svAddressTotalFrames>=0.70 &&
-      now-svAddressLastGood<=SV_ADDRESS_GAP_MS;
+    const confirmed=validGeometry && svAddressLastGood===now &&
+      svAddressGoodFrames>=SV_ADDRESS_MIN_GOOD_FRAMES && svAddressGoodFrames/svAddressTotalFrames>=0.70;
     if(svAddressCandidateSince){
       $('addressState').textContent='CHECK '+addressCheck.score+'/7';
       $('state').className='state wait';
@@ -1290,25 +1327,13 @@ async function onResults(results){
       if(held>=STABLE_MS && confirmed){
         svReadyTrace.readyCount++;svReadyTrace.lastReason='READY 성공';
         addressLocked=true;
-        ready=true;readyAt=now;stableSince=0;svResetAddressCandidate();
+        ready=true;readyAt=now;readyCuePlayed=false;svResetAddressCandidate();
         // READY is unlimited; rolling buffer retains only the latest 1.5 seconds.
-        $('addressState').textContent='LOCK';
+        svShowReady();
         $('overlay').style.display='flex';
-        $('state').className='state ready';$('state').textContent='READY';
-        $('status').textContent='ADDRESS LOCK 완료 · 0.3초 후 삑 소리가 나면 바로 스윙하세요.';
-
-        setTimeout(()=>{
-          if(ready && addressLocked){
-            tone(980,.12);
-            $('state').textContent='READY · 삑 — 지금 스윙';
-            $('status').textContent='ADDRESS LOCK 이후의 관절 움직임만 스윙 후보로 판단합니다.';
-          }
-        },READY_BEEP_DELAY);
-
-        setTimeout(()=>$('overlay').style.display='none',900);
+        setTimeout(()=>{if(readyAt===now)$('overlay').style.display='none';},900);
       }
     }else{
-      stableSince=0;
       addressLocked=false;
       $('addressState').textContent=isAddress?'유사 '+addressCheck.score+'/7':'OFF';
       $('state').className='state wait';
@@ -1324,7 +1349,9 @@ async function onResults(results){
   }
 
   if(ready && addressLocked && !swingStarted){
+    if($('addressState').textContent==='LOCK 대기')svShowReady();
     if(now-readyAt<READY_BEEP_DELAY) return;
+    if(!readyCuePlayed){readyCuePlayed=true;tone(980,.12);svShowReady();}
 
     // 걷기 배제 핵심:
     // 1) 골반이 이동하지 않아야 함
@@ -1339,8 +1366,13 @@ async function onResults(results){
       m.handSpeed>=SWING_HAND_SPEED &&
       m.shoulderTurn>=SWING_SHOULDER_TURN;
 
-    if(feetPlanted && golfPattern){
+    // PC R15 side-only 50ms temporal rule. Same four original numeric limits.
+    const strictMotion=feetPlanted && golfPattern;
+    const temporalSideMotion=!strictMotion && !!window.svMobileR15?.temporalCandidate(
+      now,m,addressCheck,feetPlanted,ready,addressLocked,cooldown,swingStarted);
+    if(strictMotion || temporalSideMotion){
       swingStarted=true;ready=false;swingStartAt=now;
+      $('overlay').style.display='none';
       $('swingState').textContent='스윙';
       $('state').className='state impact';$('state').textContent='SWING 감지';
       $('status').textContent='골프 스윙 패턴 확인 · 영상 저장 중';
@@ -1348,8 +1380,10 @@ async function onResults(results){
       svStartPreRollCapture();
       cooldown=true;
 
+      const cameraEpoch=svCameraEpoch;
       setTimeout(()=>{
-        swingStarted=false;addressLocked=false;ready=false;lastPose=null;lastPoseTime=0;cooldown=false;
+        if(cameraEpoch!==svCameraEpoch)return;
+        swingStarted=false;svClearReady();cooldown=false;
         $('addressState').textContent='OFF';$('swingState').textContent='대기';
         $('state').className='state wait';$('state').textContent='다음 스윙 대기';
         $('status').textContent='최근 스윙 반복재생 유지 · 다음 어드레스를 기다립니다.';
@@ -1372,50 +1406,60 @@ function livePreviewLoop(){
 livePreviewLoop();
 
 async function poseLoop(){
-  if(!stream) return;
+  const current=stream;
+  if(!current) return;
   if(!processing && raw.readyState>=2 && raw.videoWidth && raw.videoHeight){
     processing=true;
     try{
-      // 카메라 센서 원본은 90° 돌아가 있으므로,
-      // MediaPipe에는 바로 세운 프레임을 전달한다.
-      poseInput.width=raw.videoHeight;
-      poseInput.height=raw.videoWidth;
+      const rotation=window.svPreviewRotationDeg??svDefaultPoseRotation;
+      const quarterTurn=rotation%180!==0;
+      const width=quarterTurn?raw.videoHeight:raw.videoWidth;
+      const height=quarterTurn?raw.videoWidth:raw.videoHeight;
+      if(svPoseRotation!==rotation || poseInput.width!==width || poseInput.height!==height){
+        if(!cooldown)svClearReady();
+        window.svMobileR15?.reset();
+        svPoseRotation=rotation;
+        poseInput.width=width;
+        poseInput.height=height;
+      }
       poseInputCtx.setTransform(1,0,0,1,0,0);
       poseInputCtx.clearRect(0,0,poseInput.width,poseInput.height);
       poseInputCtx.translate(poseInput.width/2,poseInput.height/2);
-      poseInputCtx.rotate(Math.PI/2);
+      poseInputCtx.rotate(svPoseRotation*Math.PI/180);
       poseInputCtx.drawImage(raw,-raw.videoWidth/2,-raw.videoHeight/2);
       poseInputCtx.setTransform(1,0,0,1,0,0);
       await pose.send({image:poseInput});
     }catch(e){
-      processing=false;
-      if($('status')) $('status').textContent='카메라 영상 연결됨 · 관절모델 준비/처리 중';
+      if(stream===current){
+        processing=false;
+        $('status').textContent='카메라 영상 연결됨 · 관절모델 준비/처리 중';
+      }
     }
   }
-  raf=requestAnimationFrame(poseLoop);
+  if(stream===current)raf=requestAnimationFrame(poseLoop);
+}
+
+function svFitVideo(width,height,boxWidth,boxHeight,rotation){
+  const quarter=rotation%180!==0;
+  const scale=Math.min((quarter?boxHeight:boxWidth)/width,(quarter?boxWidth:boxHeight)/height);
+  return {width:width*scale,height:height*scale};
 }
 
 function replayLoop(){
   if(replay.videoWidth){
-    const r=replayCanvas.getBoundingClientRect();
-    const cw=Math.max(1,Math.round(r.width)),ch=Math.max(1,Math.round(r.height));
+    const cw=Math.max(1,replayCanvas.clientWidth),ch=Math.max(1,replayCanvas.clientHeight);
     if(replayCanvas.width!==cw||replayCanvas.height!==ch){
       replayCanvas.width=cw;replayCanvas.height=ch;
     }
     rctx.clearRect(0,0,cw,ch);
 
     const deg=(window.svFrontRotation??90)%360;
-    const rotated=(deg===90||deg===270);
-    const sw=replay.videoWidth, sh=replay.videoHeight;
-    const outW=rotated?sh:sw, outH=rotated?sw:sh;
-
-    // 원본 종횡비 유지 + 영상 전체 표시 + 크롭/늘어남 금지
-    const scale=Math.min(cw/outW,ch/outH);
+    const frame=svFitVideo(replay.videoWidth,replay.videoHeight,cw,ch,deg);
 
     rctx.save();
     rctx.translate(cw/2,ch/2);
     rctx.rotate(deg*Math.PI/180);
-    rctx.drawImage(replay,-sw*scale/2,-sh*scale/2,sw*scale,sh*scale);
+    rctx.drawImage(replay,-frame.width/2,-frame.height/2,frame.width,frame.height);
     rctx.restore();
   }
   requestAnimationFrame(replayLoop);
@@ -1428,9 +1472,10 @@ function sizeRawPreview(){
   const stage=$('liveStage');
   if(!stage || !raw || !raw.videoWidth || !raw.videoHeight) return;
   const w=Math.max(1,stage.clientWidth), h=Math.max(1,stage.clientHeight);
-  // Because camera is physically mounted 90 degrees, swap stage dimensions.
-  raw.style.width=h+'px';
-  raw.style.height=w+'px';
+  const rotation=window.svPreviewRotationDeg??svDefaultPoseRotation;
+  const frame=svFitVideo(raw.videoWidth,raw.videoHeight,w,h,rotation);
+  raw.style.setProperty('width',frame.width+'px','important');
+  raw.style.setProperty('height',frame.height+'px','important');
 }
 window.addEventListener('resize',()=>setTimeout(sizeRawPreview,30));
 
@@ -1452,39 +1497,60 @@ async function refreshCameraList(){
 if(navigator.mediaDevices?.addEventListener) navigator.mediaDevices.addEventListener('devicechange',refreshCameraList);
 refreshCameraList();
 
+function svCameraFormat(){
+  const format={width:{ideal:1280},frameRate:{ideal:30}};
+  if(!svIsMobileCamera())return {...format,height:{ideal:720}};
+  // A taller mobile capture format gives the golfer more vertical room.
+  const supported=navigator.mediaDevices.getSupportedConstraints?.();
+  return {...format,aspectRatio:{ideal:4/3},
+    ...(supported?.resizeMode?{resizeMode:{ideal:'none'}}:{})};
+}
+
 $('connect').onclick=async()=>{
+  if(svConnectionPending||stream)return;
+  const cameraEpoch=++svCameraEpoch;
+  svConnectionPending=true;
+  $('connect').disabled=true;
+  let incoming=null;
   try{
     const selectedCamera=$('cameraSelect')?.value||'';
     if(!window.isSecureContext || !navigator.mediaDevices?.getUserMedia){
       $('status').textContent='카메라 연결 불가: 현재 파일 주소(content:// 또는 file://)에서는 브라우저가 카메라를 차단할 수 있습니다. SV MOBILE을 HTTPS 웹주소로 열어주세요.';
       return;
     }
+    const format=svCameraFormat();
     const videoConstraints=selectedCamera
-      ? {deviceId:{exact:selectedCamera},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}}
-      : {facingMode:{exact:'user'},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}};
+      ? {...format,deviceId:{exact:selectedCamera}}
+      : {...format,facingMode:{exact:'user'}};
     $('status').textContent='카메라 권한을 요청하는 중입니다. 브라우저 권한 창에서 허용을 눌러주세요.';
     // Never silently switch a requested front camera to the rear camera.
     try {
-      stream=await navigator.mediaDevices.getUserMedia({video:videoConstraints,audio:false});
+      incoming=await navigator.mediaDevices.getUserMedia({video:videoConstraints,audio:false});
     } catch (cameraError) {
       if (cameraError?.name !== 'OverconstrainedError') throw cameraError;
       // PC webcam compatibility: relax constraints only after the original request fails.
       const relaxedVideo = selectedCamera
-        ? {deviceId:{ideal:selectedCamera},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}}
-        : {facingMode:{ideal:'user'},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}};
+        ? {...format,deviceId:{ideal:selectedCamera}}
+        : {...format,facingMode:{ideal:'user'}};
       try {
-        stream=await navigator.mediaDevices.getUserMedia({video:relaxedVideo,audio:false});
+        if(cameraEpoch!==svCameraEpoch)return;
+        incoming=await navigator.mediaDevices.getUserMedia({video:relaxedVideo,audio:false});
       } catch (retryError) {
         if (retryError?.name !== 'OverconstrainedError') throw retryError;
-        stream=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
+        if(cameraEpoch!==svCameraEpoch)return;
+        incoming=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
       }
     }
-    raw.srcObject=stream;
+    if(cameraEpoch!==svCameraEpoch){incoming.getTracks().forEach(track=>track.stop());return;}
+    stream=incoming;
+    raw.srcObject=incoming;
     raw.style.display='block';
     await raw.play();
+    if(cameraEpoch!==svCameraEpoch)return;
     sizeRawPreview();
     if(typeof window.fitLiveStageInsideViewport==='function') setTimeout(window.fitLiveStageInsideViewport,60);
     await refreshCameraList();
+    if(cameraEpoch!==svCameraEpoch)return;
     raw.addEventListener('loadedmetadata',sizeRawPreview,{once:true});
     raw.addEventListener('canplay',sizeRawPreview,{once:true});
     drawRawPreviewFrame();
@@ -1497,13 +1563,16 @@ $('connect').onclick=async()=>{
       minDetectionConfidence:0.45,
       minTrackingConfidence:0.45
     });
-    pose.onResults(onResults);
+    pose.onResults(results=>stream===incoming?onResults(results):undefined);
     svStartRolling();
 
     $('connect').disabled=true;$('arm').disabled=false;$('disconnect').disabled=false;
-    $('status').textContent='카메라 영상 연결됨 · 90° 정상화 관절감지 준비 완료';
+    $('status').textContent='카메라 연결됨 · 스윙감지를 켜세요.';
     poseLoop();
+    window.svConnectSideCamera?.().catch(()=>{});
   }catch(e){
+    if(cameraEpoch!==svCameraEpoch)return;
+    if(stream)svSuspendCamera();
     const reason=e?.name||'UnknownError';
     const guidance=reason==='NotAllowedError'||reason==='PermissionDeniedError'
       ? '카메라 권한이 거부되었습니다. Chrome 주소창 왼쪽 사이트 설정에서 카메라 허용을 확인하세요. content:// 파일이면 HTTPS 주소로 실행해야 합니다.'
@@ -1512,11 +1581,18 @@ $('connect').onclick=async()=>{
       : reason==='OverconstrainedError'?'선택한 카메라의 영상 설정을 지원하지 않습니다. 기본 카메라로 다시 시도하세요.'
       : '브라우저 카메라 권한과 HTTPS 연결 상태를 확인하세요.';
     $('status').textContent='연결 실패: '+reason+' — '+guidance;
+  }finally{
+    if(cameraEpoch===svCameraEpoch){
+      svConnectionPending=false;
+      $('connect').disabled=!!stream;
+    }
   }
 };
 
 $('arm').onclick=()=>{
-  armed=!armed;if(!armed){svRolling.front=[];svRolling.side=[];}ready=false;addressLocked=false;stableSince=0;svResetAddressCandidate();swingStarted=false;lastPose=null;lastPoseTime=0;
+  armed=!armed;
+  if(!armed){svRolling.front=[];svRolling.side=[];}
+  svClearReady();swingStarted=false;
   $('arm').textContent=armed?'스윙감지 OFF':'스윙감지 ON';
   $('state').className='state wait';
   $('addressState').textContent='OFF';$('state').textContent=armed?'사람/어드레스 대기':'대기';
@@ -1529,7 +1605,7 @@ function sendReplayToTUp(slot){
   const target=(window.opener&&!window.opener.closed)?window.opener:null;
   if(!target){$('result').textContent='티업 회원카드에서 SV 촬영을 열어야 전송됩니다.';return;}
   try{
-    target.postMessage({type:'TUP_SV_VIDEO',slot:slot,blob:latestReplayBlob,rotation:90,createdAt:Date.now()},'*');
+    target.postMessage({type:'TUP_SV_VIDEO',slot:slot,blob:latestReplayBlob,rotation:latestReplayRotation,createdAt:Date.now()},'*');
     $('result').textContent='✓ '+slot+'화면 전송 완료';
   }catch(e){$('result').textContent='전송 실패: '+e.message;}
 }
@@ -1599,14 +1675,27 @@ replay.addEventListener('timeupdate',()=>{
 });
 
 $('disconnect').onclick=()=>{
+  svCameraEpoch++;svConnectionPending=false;
   armed=false;
+  svClearReady();window.svMobileR15?.reset();
+  processing=false;cooldown=false;swingStarted=false;svCaptureActive=false;
+  svRolling.front=[];svRolling.side=[];
+  if(svCaptureInterval!==null){clearInterval(svCaptureInterval);svCaptureInterval=null;}
   if(raf) cancelAnimationFrame(raf);
   if(stream) stream.getTracks().forEach(t=>t.stop());
   if(recorder&&recorder.state==='recording') recorder.stop();
   stream=null;raw.srcObject=null;
+  const previousPose=pose;
+  pose=null;
+  if(previousPose)Promise.resolve().then(()=>previousPose.close()).catch(()=>{});
   $('connect').disabled=false;$('arm').disabled=true;$('disconnect').disabled=true;
+  $('arm').textContent='스윙감지 ON';
+  $('addressState').textContent='OFF';$('state').className='state wait';$('state').textContent='대기';
   $('status').textContent='해제됨';
 };
+function svSuspendCamera(){
+  if(stream||svConnectionPending)$('disconnect').dispatchEvent(new Event('click'));
+}
 </script>
 
 <script id="svV121DualReplayScript">
@@ -1879,12 +1968,15 @@ $('disconnect').onclick=()=>{
     }
 
     // 정면 카메라가 실제로 연결될 때까지 기다린 후 실제 deviceId를 읽는다.
-    const frontTrack=stream?.getVideoTracks?.()[0];
+    const frontSession=stream;
+    const frontTrack=frontSession?.getVideoTracks()[0];
+    if(!frontTrack)return false;
     const actualFrontId=frontTrack?.getSettings?.().deviceId || byId('cameraSelect')?.value || '';
 
     await refreshSideCameraList();
 
     const devices=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');
+    if(stream!==frontSession)return false;
     if(devices.length<2){
       wrap.classList.remove('dual-camera-active');
       byId('sideResult').textContent='카메라 1대 · 정면 리플레이 전체화면';
@@ -1893,6 +1985,13 @@ $('disconnect').onclick=()=>{
 
     // 실제 정면 장치와 다른 장치를 CAM2로 선택.
     let id=sel.value;
+    // Android and iOS also enumerate their built-in lenses as separate inputs.
+    // Only an explicitly selected second camera should split mobile replay.
+    if(svIsMobileCamera() && (!id || id===actualFrontId)){
+      wrap.classList.remove('dual-camera-active');
+      byId('sideResult').textContent='모바일 · 리플레이 1화면';
+      return false;
+    }
     if(!id || id===actualFrontId){
       const candidate=devices.find(d=>d.deviceId && d.deviceId!==actualFrontId);
       id=candidate?.deviceId||'';
@@ -1907,11 +2006,17 @@ $('disconnect').onclick=()=>{
 
     if(sideStream) sideStream.getTracks().forEach(t=>t.stop());
 
+    let incoming=null;
     try{
-      sideStream=await navigator.mediaDevices.getUserMedia({
+      incoming=await navigator.mediaDevices.getUserMedia({
         video:{deviceId:{exact:id},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:60}},
         audio:false
       });
+      if(stream!==frontSession){
+        incoming.getTracks().forEach(t=>t.stop());
+        return false;
+      }
+      sideStream=incoming;
 
       const sideTrack=sideStream.getVideoTracks()[0];
       const actualSideId=sideTrack?.getSettings?.().deviceId||id;
@@ -1927,34 +2032,21 @@ $('disconnect').onclick=()=>{
 
       if(!svSideLive){svSideLive=document.createElement('video');svSideLive.muted=true;svSideLive.playsInline=true;}
       svSideLive.srcObject=sideStream;await svSideLive.play();
+      if(stream!==frontSession||sideStream!==incoming)return false;
       wrap.classList.add('dual-camera-active');
       byId('sideResult').textContent='CAM2 연결 확인 · 정면/측면 50:50 자동 전환';
       return true;
     }catch(e){
-      sideStream=null;
+      if(incoming)incoming.getTracks().forEach(t=>t.stop());
+      if(sideStream===incoming)sideStream=null;
+      if(stream!==frontSession)return false;
       wrap.classList.remove('dual-camera-active');
       byId('sideResult').textContent='CAM2 연결 안됨 · 정면 리플레이 전체화면';
       return false;
     }
   }
 
-  /* 카메라 연결 1회:
-     정면 연결 완료를 확인한 뒤에만 CAM2 자동 연결을 시도 */
-  byId('connect')?.addEventListener('click',async()=>{
-    const wrap=document.querySelector('.wrap');
-    if(wrap) wrap.classList.remove('dual-camera-active');
-
-    // 최초 권한 팝업까지 고려해 최대 약 15초 동안 정면 스트림을 기다림.
-    for(let i=0;i<60;i++){
-      if(stream?.getVideoTracks?.().length && stream.getVideoTracks()[0].readyState==='live'){
-        await connectSideCamera();
-        return;
-      }
-      await new Promise(r=>setTimeout(r,250));
-    }
-
-    if(wrap) wrap.classList.remove('dual-camera-active');
-  },true);
+  window.svConnectSideCamera=connectSideCamera;
 
   window.svLoadCapturedSide=function(blob){
     latestSideBlob=blob;
@@ -2104,7 +2196,9 @@ $('disconnect').onclick=()=>{
       if(status && (which==='front'?frontJointOn:sideJointOn)){
         status.textContent=landmarks?'관절 분석: 좌표 '+landmarks.length+'개 수신':'관절 분석: 인체 좌표 미검출';
       }
-      drawReplayJoints(which,landmarks);
+      if(which==='front'?frontJointOn:sideJointOn) drawReplayJoints(which,landmarks);
+      // Independent R15 replay V-zone, only when its left-side checkbox is enabled.
+      window.svReplayVZone?.onPose?.(which,landmarks,which==='front'?frontJointInput:sideJointInput);
     });
     if(isFront) frontReplayPose=p; else sideReplayPose=p;
     return p;
@@ -2285,11 +2379,11 @@ $('disconnect').onclick=()=>{
 
   async function jointLoop(){
     const now=performance.now();
-    if(frontJointOn && !frontPoseBusy && now-frontLastPoseAt>90){
+    if((frontJointOn || window.svReplayVZone?.wants?.('front')) && !frontPoseBusy && now-frontLastPoseAt>90){
       frontPoseBusy=true;frontLastPoseAt=now;
       try{await processReplayPose('front');}catch(e){const st=byId('result');if(st)st.textContent='관절 분석 오류: '+(e.message||String(e));console.error('front replay pose',e);}finally{frontPoseBusy=false;}
     }
-    if(sideJointOn && !sidePoseBusy && now-sideLastPoseAt>90){
+    if((sideJointOn || window.svReplayVZone?.wants?.('side')) && !sidePoseBusy && now-sideLastPoseAt>90){
       sidePoseBusy=true;sideLastPoseAt=now;
       try{await processReplayPose('side');}catch(e){const st=byId('sideResult');if(st)st.textContent='측면 관절 분석 오류: '+(e.message||String(e));console.error('side replay pose',e);}finally{sidePoseBusy=false;}
     }
@@ -2335,6 +2429,7 @@ $('disconnect').onclick=()=>{
     if(sideRecorder&&sideRecorder.state==='recording') sideRecorder.stop();
     if(sideStream) sideStream.getTracks().forEach(t=>t.stop());
     sideStream=null;
+    if(svSideLive)svSideLive.srcObject=null;
     document.querySelector('.wrap')?.classList.remove('dual-camera-active');
     byId('sideResult').textContent='CAM2 해제 · 정면 리플레이 전체화면';
   },true);
@@ -2763,7 +2858,7 @@ body>#svDrawDock{z-index:3300!important}
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 })();
 </script>
-<!-- SV MOBILE camera preview rotation control: display only; capture/pose processing untouched. -->
+<!-- The camera rotation also aligns the input to pose detection. -->
 <style id="svCameraRotateControlStyle">
 body #svCameraRotateBtn{position:fixed!important;top:calc(env(safe-area-inset-top,0px) + 104px)!important;right:clamp(8px,2vw,16px)!important;left:auto!important;z-index:5100!important;display:block!important;visibility:visible!important;opacity:1!important;transform:none!important;width:auto!important;min-width:62px!important;height:40px!important;min-height:40px!important;padding:6px 10px!important;font:700 13px Arial,sans-serif!important;background:rgba(22,82,58,.92)!important;color:#fff!important;border:1px solid rgba(163,205,176,.6)!important;border-radius:10px!important;box-shadow:0 2px 10px #0008!important}
 </style>
@@ -2779,15 +2874,11 @@ body #svCameraRotateBtn{position:fixed!important;top:calc(env(safe-area-inset-to
   btn.type='button';btn.id='svCameraRotateBtn';btn.textContent='↻ 90°';btn.title='카메라 영상과 관절 표시를 함께 90도씩 회전';
   const select=document.getElementById('cameraSelect');
   if(select)select.insertAdjacentElement('afterend',btn);else bar.appendChild(btn);
-  let angle=90;
+  let angle=svDefaultPoseRotation;
   function apply(){
-   const w=Math.max(1,stage.clientWidth),h=Math.max(1,stage.clientHeight);
-   const quarter=angle%180!==0;
-   raw.style.setProperty('width',(quarter?h:w)+'px','important');
-   raw.style.setProperty('height',(quarter?w:h)+'px','important');
    raw.style.setProperty('transform','translate(-50%,-50%) rotate('+angle+'deg)','important');
-   // Joint coordinates are projected per-frame in drawSkeleton; never CSS-rotate the canvas.
    window.svPreviewRotationDeg=angle;
+   sizeRawPreview();
    if(joints){
     joints.style.setProperty('transform','none','important');
     joints.style.setProperty('transform-origin','center center','important');
@@ -3442,5 +3533,6 @@ body #svCompactViewDock #svGhostButton{
 })();
 </script>
 
+<script src="./sv-r15-mobile-replay-vzone.js"></script>
 </body>
 </html>

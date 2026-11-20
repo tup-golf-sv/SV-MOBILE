@@ -153,42 +153,50 @@ test('blocks a brief hand jitter and requires departure from a settled address',
   assert.equal(gate.update(lifted,true,450),false);
 });
 test('camera callback gates untrusted targets and leaves an active capture alone', async () => {
-  const received=[];
-  let clock=0, rectangles=0;
+  let clock=1000, rectangles=0;
   const context={
     clearRect(){}, strokeRect(){rectangles++;}, setLineDash(){},
     fillRect(){}, fillText(){}, measureText(){return {width:40};}
   };
   const rect={width:320,height:320,left:0,top:0};
-  const layer={
-    style:{},setAttribute(){},getContext(){return context;},getBoundingClientRect(){return rect;}
-  };
-  const stage={append(){}};
+  const element=()=>({
+    style:{setProperty(){}},setAttribute(){},getContext(){return context;},
+    getBoundingClientRect(){return rect;},append(){},addEventListener(){}
+  });
+  const elements=new Map();
   const sandbox={
     document:{
-      getElementById:id=>id==='liveStage'?stage:layer,
-      createElement:()=>layer
+      getElementById(id){
+        if(!elements.has(id))elements.set(id,element());
+        return elements.get(id);
+      },
+      createElement:element,readyState:'loading',addEventListener(){},querySelectorAll(){return [];}
     },
-    performance:{now:()=>clock}, setInterval(){},
-    onResults:async result=>{received.push(result.poseLandmarks);},
-    poseMotionMetrics:()=>({handSpeed:1}),
-    svPoseDisplayPoint:p=>({x:p.x*320,y:p.y*320}),
-    svAddressAnalysisLandmarks:p=>p, stream:{}, poseInput:{width:320,height:320},
-    armed:true, ready:false, cooldown:false, swingStarted:false, lastPoseRenderAt:0
+    navigator:{userAgent:'Android'},performance:{now:()=>clock},
+    setInterval(){},setTimeout(){},addEventListener(){},requestAnimationFrame(){}
   };
   sandbox.window=sandbox;
-  const source=fs.readFileSync(require.resolve('../../androidapp/app/src/debug/assets/live-golfer-tracking.js'),'utf8');
-  vm.runInNewContext(source,sandbox);
+  vm.createContext(sandbox);
+  const html=fs.readFileSync(require.resolve('../../index.html'),'utf8');
+  const callback=[...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)]
+    .map(match=>match[1]).find(source=>source.includes('async function onResults(results)'));
+  vm.runInContext(fs.readFileSync(require.resolve('../../sv-r15-mobile-core.js'),'utf8'),sandbox);
+  vm.runInContext(callback,sandbox);
+  vm.runInContext('armed=true;stream={};poseInput.width=320;poseInput.height=320;svAddressDiagnostic=()=>{};',sandbox);
+  vm.runInContext(fs.readFileSync(require.resolve('../../androidapp/app/src/debug/assets/live-golfer-tracking.js'),'utf8'),sandbox);
   const target=golferLandmarks();
   await sandbox.onResults({poseLandmarks:target});
-  assert.equal(received.at(-1),null);
-  for(clock=50;clock<=350;clock+=50) await sandbox.onResults({poseLandmarks:target});
-  assert.equal(received.at(-1),target);
+  assert.equal(sandbox.svMobileR15.getPipeline().accepted,false);
+  assert.equal(vm.runInContext('ready',sandbox),false);
+  for(clock=1050;clock<=2600;clock+=50) await sandbox.onResults({poseLandmarks:target});
+  assert.equal(sandbox.svMobileR15.getPipeline().accepted,true);
+  assert.equal(vm.runInContext('ready',sandbox),true);
   assert.ok(rectangles>0);
   const passer=golferLandmarks(.77,'front',false,.78);
   await sandbox.onResults({poseLandmarks:passer});
-  assert.equal(received.at(-1),null);
-  sandbox.cooldown=true;
-  await sandbox.onResults({poseLandmarks:passer});
-  assert.equal(received.at(-1),passer);
+  assert.equal(sandbox.svMobileR15.getPipeline().accepted,false);
+  assert.equal(elements.get('addressState').textContent,'LOCK 대기');
+  vm.runInContext('cooldown=true; swingStarted=true; svCaptureActive=true;',sandbox);
+  await sandbox.onResults({poseLandmarks:null});
+  assert.equal(vm.runInContext('cooldown && swingStarted && svCaptureActive',sandbox),true);
 });
